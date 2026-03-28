@@ -202,8 +202,9 @@ docker exec esphome esphome config satellite-test.yaml
 ## Stato attuale (2026-03-28)
 
 ### Firmware
-- **`satellite-test.yaml`** — firmware completo con LVGL 3 pagine + voice_assistant (audio NON funziona con componenti ESPHome standard, necessita migrazione a raw I2S)
-- **`audio-test.yaml`** (v0.2.4) — firmware test audio con I2S raw duplex, tutto funzionante: tono, echo, wake word "okay nabu" + VAD
+- **`voice-test.yaml`** (v0.4.10) — Voice assistant HA completo: wake word + STT + TTS + volume + tap-to-talk
+- **`audio-test.yaml`** (v0.3.1) — Test audio standalone: tono, echo, wake word + VAD echo
+- **`satellite-test.yaml`** — LVGL 3 pagine (orologio, controlli luci, voice placeholder) — da unificare con voice-test
 
 ### Completati
 - [x] Board ricevuta e testata (board test via web flasher Freenove)
@@ -220,13 +221,19 @@ docker exec esphome esphome config satellite-test.yaml
 - [x] WiFi dual (casa + hotspot GalaxyRagio) per test fuori casa
 - [x] Share Samba `\\ragio-server\esphome` per accesso firmware da Windows
 
+### Completati (2026-03-28)
+- [x] Custom speaker component (`duplex_speaker`) wrappa I2S TX duplex
+- [x] Voice assistant HA funzionante (wake word + STT OpenAI + TTS OpenAI)
+- [x] Tap-to-talk (pulsante display avvia Assist)
+- [x] Continued conversation (HA riattiva ascolto su domande)
+- [x] Volume controllabile da HA (number entity → ES8311 registro 0x32)
+- [x] UI stati: blu (pronto) → rosso (ascolto) → verde (risposta) → blu
+- [x] Auto-restart wake word dopo ogni ciclo
+
 ### Prossimi passi
-1. [ ] Creare custom speaker component (wrappa I2S TX duplex, come duplex_mic per RX)
-2. [ ] Integrare voice_assistant ESPHome con custom mic + custom speaker
-3. [ ] Collegare voice_assistant alla pipeline Assist di HA (STT OpenAI + TTS OpenAI)
-4. [ ] Unificare audio-test.yaml e satellite-test.yaml in un unico firmware
-5. [ ] Collegare voice_assistant alla UI LVGL pagina 3
-6. [ ] Rinominare firmware a nome stanza definitivo
-7. [ ] Configurare pipeline Assist dedicata in HA
-8. [ ] Aggiungere `device_id` del nuovo satellite al mapping degli intent
-9. [ ] Implementare intent `MostraTelecamera` e `CercaWeb` con il `device_id`
+1. [ ] Unificare voice-test.yaml e satellite-test.yaml (LVGL 3 pagine + voice)
+2. [ ] Rinominare firmware a nome stanza definitivo
+3. [ ] Configurare pipeline Assist dedicata in HA
+4. [ ] Aggiungere `device_id` del nuovo satellite al mapping degli intent
+5. [ ] Implementare intent `MostraTelecamera` e `CercaWeb` con il `device_id`
+6. [ ] Valutare media_player per TTS (richiede rete locale, non funziona via hotspot)
