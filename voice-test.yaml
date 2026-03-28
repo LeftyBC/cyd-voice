@@ -1,7 +1,7 @@
 substitutions:
   name: "voice-test"
   friendly_name: "Voice Test"
-  version: "0.4.2"
+  version: "0.4.6"
 
 esphome:
   name: ${name}
@@ -124,6 +124,7 @@ logger:
     sensor: WARN
     FT63X6: WARN
     touchscreen: WARN
+    voice_assistant: WARN
 
 api:
   encryption:
@@ -193,7 +194,7 @@ voice_assistant:
   micro_wake_word: mww
   noise_suppression_level: 2
   auto_gain: 31dBFS
-  volume_multiplier: 2.0
+  volume_multiplier: 1.0
   on_listening:
     - lambda: |-
         id(echo_state) = 1;
@@ -210,14 +211,15 @@ voice_assistant:
     - lambda: 'ESP_LOGW("va", "TTS audio received");'
   on_end:
     - lambda: |-
+        ESP_LOGW("va", "Pipeline ended");
+  on_tts_stream_end:
+    - lambda: |-
+        ESP_LOGW("va", "TTS stream ended");
         id(echo_state) = 3;
-        ESP_LOGW("va", "Done");
-    - micro_wake_word.start:
   on_error:
     - lambda: |-
         ESP_LOGE("va", "Error: %s", code.c_str());
         id(echo_state) = 3;
-    - micro_wake_word.start:
   on_client_connected:
     - lambda: 'ESP_LOGW("va", "HA connected");'
     - micro_wake_word.start:
@@ -644,28 +646,46 @@ interval:
           if (state != last_state) {
             last_state = state;
             if (state == 0) {
-              // PRONTO = BLU
               lv_obj_set_style_bg_color(id(echo_circle), lv_color_hex(0x0B56FC), 0);
               lv_label_set_text(id(lbl_status), "PRONTO");
               lv_obj_set_style_text_color(id(lbl_status), lv_color_hex(0x0B56FC), 0);
             } else if (state == 1) {
-              // REGISTRAZIONE = ROSSO
               lv_obj_set_style_bg_color(id(echo_circle), lv_color_hex(0xFF0000), 0);
-              lv_label_set_text(id(lbl_status), "REGISTRAZIONE...");
+              lv_label_set_text(id(lbl_status), "ASCOLTO...");
               lv_obj_set_style_text_color(id(lbl_status), lv_color_hex(0xFF0000), 0);
             } else if (state == 2) {
-              // RIPRODUZIONE = VERDE
               lv_obj_set_style_bg_color(id(echo_circle), lv_color_hex(0x00CC00), 0);
-              lv_label_set_text(id(lbl_status), "RIPRODUZIONE...");
+              lv_label_set_text(id(lbl_status), "RISPOSTA...");
               lv_obj_set_style_text_color(id(lbl_status), lv_color_hex(0x00CC00), 0);
             } else if (state == 3) {
-              // Done -> torna a PRONTO
               lv_obj_set_style_bg_color(id(echo_circle), lv_color_hex(0x0B56FC), 0);
               lv_label_set_text(id(lbl_status), "PRONTO");
               lv_obj_set_style_text_color(id(lbl_status), lv_color_hex(0x0B56FC), 0);
               id(echo_state) = 0;
               last_state = 0;
             }
+          }
+
+          // Auto-restart wake word se fermo e speaker fermo
+          static uint32_t done_time = 0;
+          if (state == 3 || state == 0) {
+            if (!id(mww).is_running() && !id(spk_duplex).is_running()) {
+              if (done_time == 0) {
+                done_time = millis();
+              } else if ((millis() - done_time) > 1500) {
+                done_time = 0;
+                if (!id(mic_duplex).is_running()) {
+                  id(mic_duplex).start();
+                  ESP_LOGW("ui", "Mic restarted");
+                }
+                id(mww).start();
+                ESP_LOGW("ui", "Wake word restarted");
+              }
+            } else {
+              done_time = 0;
+            }
+          } else {
+            done_time = 0;
           }
 
 # --- Sensors ---

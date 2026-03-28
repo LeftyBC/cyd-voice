@@ -101,8 +101,8 @@ void DuplexSpeaker::speaker_task_(void *param) {
       vRingbufferReturnItem(self->ring_buffer_, item);
     } else {
       idle_count++;
-      // If finish requested and no more data, stop
-      if (self->finish_requested_ && idle_count > 5) {
+      // Auto-stop: finish requested OR idle too long (2s = 40 * 50ms)
+      if ((self->finish_requested_ && idle_count > 5) || idle_count > 40) {
         break;
       }
     }
