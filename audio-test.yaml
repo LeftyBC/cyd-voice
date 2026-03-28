@@ -1,7 +1,7 @@
 substitutions:
   name: "audio-test"
   friendly_name: "Audio Test"
-  version: "0.2.4"
+  version: "0.3.1"
 
 esphome:
   name: ${name}
@@ -78,8 +78,9 @@ esphome:
           id(i2s_tx) = (uint32_t)tx;
           id(i2s_rx) = (uint32_t)rx;
 
-          // Collega il custom mic al RX handle
+          // Collega custom mic e speaker ai handle I2S
           id(mic_duplex).set_rx_handle(rx);
+          id(spk_duplex).set_tx_handle(tx);
 
           // Aggiungi callback per calcolo livello mic
           id(mic_duplex).add_data_callback([](const std::vector<uint8_t> &data) {
@@ -163,11 +164,18 @@ external_components:
   - source:
       type: local
       path: custom_components
-    components: [duplex_mic]
+    components: [duplex_mic, duplex_speaker]
 
 microphone:
   - platform: duplex_mic
     id: mic_duplex
+    sample_rate: 16000
+    bits_per_sample: 16
+    num_channels: 1
+
+speaker:
+  - platform: duplex_speaker
+    id: spk_duplex
     sample_rate: 16000
     bits_per_sample: 16
     num_channels: 1
@@ -313,37 +321,27 @@ font:
 
 # --- Scripts ---
 script:
-  # TONO v0.2.0: usa handle I2S globali
+  # TONO v0.3.0: usa custom speaker component
   - id: diag_log
     then:
       - lambda: |-
-          xTaskCreatePinnedToCore([](void *param) {
-            ESP_LOGW("tone", "=== TONO v0.2.0 ===");
-            auto tx = (i2s_chan_handle_t)(uint32_t)id(i2s_tx);
-            gpio_set_level(GPIO_NUM_1, 0);  // Amp ON
-            const int n = 16000 * 2;
-            int16_t *tone = (int16_t *)heap_caps_malloc(n * 2, MALLOC_CAP_DEFAULT);
-            for (int i = 0; i < n; i++)
-              tone[i] = (int16_t)(16000.0f * sinf(2.0f * M_PI * 440.0f * i / 16000.0f));
-            size_t bw = 0, tw = 0;
-            while (tw < n * 2) {
-              i2s_channel_write(tx, (uint8_t*)tone + tw, n * 2 - tw, &bw, pdMS_TO_TICKS(1000));
-              tw += bw;
-            }
-            free(tone);
-            vTaskDelay(pdMS_TO_TICKS(300));
-            gpio_set_level(GPIO_NUM_1, 1);  // Amp OFF
-            ESP_LOGW("tone", "Done");
-            vTaskDelete(NULL);
-          }, "tone_task", 4096, NULL, 5, NULL, 0);
+          ESP_LOGW("tone", "=== TONO v0.3.0 (custom speaker) ===");
+          const int n = 16000 * 2;  // 2 secondi
+          std::vector<uint8_t> tone(n * 2);
+          for (int i = 0; i < n; i++) {
+            int16_t s = (int16_t)(16000.0f * sinf(2.0f * M_PI * 440.0f * i / 16000.0f));
+            tone[i*2] = s & 0xFF;
+            tone[i*2+1] = (s >> 8) & 0xFF;
+          }
+          id(spk_duplex).play(tone.data(), tone.size());
+          ESP_LOGW("tone", "Queued %d bytes to speaker", tone.size());
 
-  # VAD ECHO: registra dopo wake word finche' c'e' voce, poi riproduci
+  # VAD ECHO v0.3.1: registra con VAD, riproduci via custom speaker
   - id: vad_echo
     then:
       - lambda: |-
           xTaskCreatePinnedToCore([](void *param) {
-            ESP_LOGW("vad", "=== VAD ECHO v0.2.3 ===");
-            auto tx = (i2s_chan_handle_t)(uint32_t)id(i2s_tx);
+            ESP_LOGW("vad", "=== VAD ECHO v0.3.1 ===");
             auto rx = (i2s_chan_handle_t)(uint32_t)id(i2s_rx);
             auto *c = id(es8311_codec);
 
@@ -352,10 +350,7 @@ script:
             id(mic_duplex).stop();
             vTaskDelay(pdMS_TO_TICKS(200));
 
-            // Amp ON
-            gpio_set_level(GPIO_NUM_1, 0);
-
-            // Mute DAC
+            // Mute DAC durante registrazione
             uint8_t reg31 = 0;
             c->read_byte(0x31, &reg31);
             c->write_byte(0x31, reg31 | 0x60);
@@ -365,14 +360,14 @@ script:
 
             // Buffer in PSRAM (max 10 secondi)
             const size_t max_bytes = 16000 * 2 * 10;
-            const size_t chunk = 960;  // 30ms @ 16kHz 16bit mono
+            const size_t chunk = 960;
             uint8_t *rec_buf = (uint8_t *)heap_caps_malloc(max_bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
             if (!rec_buf) rec_buf = (uint8_t *)heap_caps_malloc(max_bytes, MALLOC_CAP_DEFAULT);
 
             size_t total_read = 0;
             const int silence_threshold = 50;
-            const int silence_timeout_ms = 1000;  // 1s di silenzio = stop
-            const int min_speech_ms = 300;  // almeno 300ms di voce
+            const int silence_timeout_ms = 1000;
+            const int min_speech_ms = 300;
             uint32_t silence_start = 0;
             bool speech_detected = false;
             bool silence_counting = false;
@@ -384,7 +379,6 @@ script:
                     std::min(chunk, max_bytes - total_read), &br, pdMS_TO_TICKS(200));
                 if (err != ESP_OK || br == 0) continue;
 
-                // Calcola RMS del chunk
                 int16_t *samples = (int16_t *)(rec_buf + total_read);
                 int num = br / 2;
                 int64_t sum = 0;
@@ -393,27 +387,23 @@ script:
                 id(mic_level) = rms;
 
                 total_read += br;
-                uint32_t elapsed_ms = total_read / 32;  // bytes / (16000*2/1000)
+                uint32_t elapsed_ms = total_read / 32;
 
                 if (rms > silence_threshold) {
-                  // Voce rilevata
                   if (!speech_detected && elapsed_ms > min_speech_ms) {
                     speech_detected = true;
                     ESP_LOGW("vad", "2. Speech detected (rms=%d)", rms);
                   }
                   silence_counting = false;
                 } else if (speech_detected) {
-                  // Silenzio dopo voce
                   if (!silence_counting) {
                     silence_counting = true;
                     silence_start = millis();
                   } else if ((millis() - silence_start) > silence_timeout_ms) {
-                    ESP_LOGW("vad", "3. Silence detected, stopping (total=%d bytes, %dms)", total_read, elapsed_ms);
+                    ESP_LOGW("vad", "3. Silence detected (%dms)", elapsed_ms);
                     break;
                   }
                 }
-
-                // Timeout massimo 10s
                 if (elapsed_ms > 10000) {
                   ESP_LOGW("vad", "3. Max duration reached");
                   break;
@@ -429,51 +419,49 @@ script:
                 vTaskDelay(pdMS_TO_TICKS(100));
 
                 id(echo_state) = 2;  // playing
-                ESP_LOGW("vad", "5. Playing back...");
+                ESP_LOGW("vad", "5. Playing via custom speaker...");
 
-                size_t total_written = 0;
-                while (total_written < total_read) {
-                  size_t bw = 0;
-                  i2s_channel_write(tx, rec_buf + total_written,
-                      total_read - total_written, &bw, pdMS_TO_TICKS(500));
-                  total_written += bw;
+                // Riproduzione via custom speaker (in chunks da 4KB per il ring buffer)
+                size_t sent = 0;
+                while (sent < total_read) {
+                  size_t to_send = std::min((size_t)4096, total_read - sent);
+                  size_t written = id(spk_duplex).play(rec_buf + sent, to_send, pdMS_TO_TICKS(500));
+                  sent += written;
                 }
-                ESP_LOGW("vad", "6. Played %d bytes", total_written);
+                ESP_LOGW("vad", "6. Queued %d bytes to speaker", sent);
+
+                // Attendi che lo speaker finisca
+                while (id(spk_duplex).has_buffered_data()) {
+                  vTaskDelay(pdMS_TO_TICKS(50));
+                }
+                vTaskDelay(pdMS_TO_TICKS(300));
+                id(spk_duplex).stop();
               }
               free(rec_buf);
             }
 
-            vTaskDelay(pdMS_TO_TICKS(500));
-            gpio_set_level(GPIO_NUM_1, 1);
             id(echo_state) = 3;
             id(echo_running) = false;
-
-            // Riavvia mic duplex + wake word
-            id(mic_duplex).start();
-            ESP_LOGW("vad", "7. Done, restarting wake word");
+            // NON riavviare mic qui — lo fa micro_wake_word.start dal main loop
+            ESP_LOGW("vad", "7. Done");
             vTaskDelete(NULL);
           }, "vad_task", 8192, NULL, 5, NULL, 0);
-      # Riavvia wake word (dal main loop, dopo che il task e' partito)
-      - delay: 500ms
+      # Riavvia wake word dal main loop (dopo che il task termina)
+      - delay: 8s
       - micro_wake_word.start:
 
-  # ECHO manuale: registra 3s fissi
+  # ECHO manuale v0.3.1: registra 3s, riproduci via custom speaker
   - id: echo_test_raw
     then:
       - lambda: |-
           xTaskCreatePinnedToCore([](void *param) {
-            ESP_LOGW("echo", "=== ECHO v0.2.1 ===");
-            auto tx = (i2s_chan_handle_t)(uint32_t)id(i2s_tx);
+            ESP_LOGW("echo", "=== ECHO v0.3.1 ===");
             auto rx = (i2s_chan_handle_t)(uint32_t)id(i2s_rx);
             auto *c = id(es8311_codec);
 
-            // Stop mic duplex e attendi che rilasci il canale RX
             id(echo_running) = true;
             id(mic_duplex).stop();
             vTaskDelay(pdMS_TO_TICKS(200));
-
-            // Amp ON
-            gpio_set_level(GPIO_NUM_1, 0);
 
             // Mute DAC
             uint8_t reg31 = 0;
@@ -502,26 +490,25 @@ script:
               vTaskDelay(pdMS_TO_TICKS(100));
 
               id(echo_state) = 2;
-              ESP_LOGW("echo", "3. Playing back...");
+              ESP_LOGW("echo", "3. Playing via custom speaker...");
 
-              size_t total_written = 0;
-              while (total_written < rec_bytes) {
-                size_t bw = 0;
-                i2s_channel_write(tx, rec_buf + total_written, rec_bytes - total_written, &bw, pdMS_TO_TICKS(500));
-                total_written += bw;
+              size_t sent = 0;
+              while (sent < total_read) {
+                size_t to_send = std::min((size_t)4096, total_read - sent);
+                size_t written = id(spk_duplex).play(rec_buf + sent, to_send, pdMS_TO_TICKS(500));
+                sent += written;
               }
-              ESP_LOGW("echo", "4. Played %d bytes", total_written);
+              while (id(spk_duplex).has_buffered_data()) {
+                vTaskDelay(pdMS_TO_TICKS(50));
+              }
+              vTaskDelay(pdMS_TO_TICKS(300));
+              id(spk_duplex).stop();
+              ESP_LOGW("echo", "4. Played %d bytes", sent);
               free(rec_buf);
             }
 
-            vTaskDelay(pdMS_TO_TICKS(500));
-            gpio_set_level(GPIO_NUM_1, 1);
             id(echo_state) = 3;
             id(echo_running) = false;
-            // Riavvia mic duplex + wake word
-            id(mic_duplex).start();
-            // Non posso chiamare micro_wake_word.start da task, setto flag
-
             ESP_LOGW("echo", "5. Done");
             vTaskDelete(NULL);
           }, "echo_task", 8192, NULL, 5, NULL, 0);
