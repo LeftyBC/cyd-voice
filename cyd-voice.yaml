@@ -1,0 +1,1085 @@
+substitutions:
+  name: "cyd-voice"
+  friendly_name: "CYD Voice"
+  version: "0.5.7"
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  platformio_options:
+    board_build.flash_mode: dio
+    board_build.flash_size: 16MB
+  on_boot:
+    priority: -100
+    then:
+      - light.turn_on:
+          id: backlight
+          brightness: 80%
+      - output.turn_off: amp_enable
+      # I2S duplex + ES8311 init
+      - lambda: |-
+          static i2s_chan_handle_t tx = NULL, rx = NULL;
+          i2s_chan_config_t chan_cfg = {};
+          chan_cfg.id = I2S_NUM_0;
+          chan_cfg.role = I2S_ROLE_MASTER;
+          chan_cfg.dma_desc_num = 6;
+          chan_cfg.dma_frame_num = 240;
+          chan_cfg.auto_clear_after_cb = true;
+          i2s_new_channel(&chan_cfg, &tx, &rx);
+
+          i2s_std_config_t std_cfg = {};
+          std_cfg.clk_cfg.sample_rate_hz = 16000;
+          std_cfg.clk_cfg.clk_src = I2S_CLK_SRC_DEFAULT;
+          std_cfg.clk_cfg.mclk_multiple = I2S_MCLK_MULTIPLE_256;
+          std_cfg.slot_cfg.data_bit_width = I2S_DATA_BIT_WIDTH_16BIT;
+          std_cfg.slot_cfg.slot_bit_width = I2S_SLOT_BIT_WIDTH_AUTO;
+          std_cfg.slot_cfg.slot_mode = I2S_SLOT_MODE_MONO;
+          std_cfg.slot_cfg.slot_mask = I2S_STD_SLOT_LEFT;
+          std_cfg.slot_cfg.ws_width = I2S_DATA_BIT_WIDTH_16BIT;
+          std_cfg.slot_cfg.ws_pol = false;
+          std_cfg.slot_cfg.bit_shift = true;
+          std_cfg.gpio_cfg.mclk = GPIO_NUM_4;
+          std_cfg.gpio_cfg.bclk = GPIO_NUM_5;
+          std_cfg.gpio_cfg.ws = GPIO_NUM_7;
+          std_cfg.gpio_cfg.dout = GPIO_NUM_8;
+          std_cfg.gpio_cfg.din = GPIO_NUM_6;
+          std_cfg.gpio_cfg.invert_flags = {};
+          i2s_channel_init_std_mode(tx, &std_cfg);
+          i2s_channel_init_std_mode(rx, &std_cfg);
+          i2s_channel_enable(tx);
+          i2s_channel_enable(rx);
+
+          auto *c = id(es8311_codec);
+          c->write_byte(0x00, 0x1F);
+          vTaskDelay(pdMS_TO_TICKS(20));
+          c->write_byte(0x00, 0x00);
+          vTaskDelay(pdMS_TO_TICKS(10));
+          c->write_byte(0x01, 0x3F); c->write_byte(0x02, 0x08);
+          c->write_byte(0x03, 0x10); c->write_byte(0x04, 0x10);
+          c->write_byte(0x05, 0x00); c->write_byte(0x06, 0x03);
+          c->write_byte(0x07, 0x00); c->write_byte(0x08, 0xFF);
+          uint8_t r = 0; c->read_byte(0x00, &r);
+          c->write_byte(0x00, r & 0xBF);
+          c->write_byte(0x09, 0x0C); c->write_byte(0x0A, 0x0C);
+          c->write_byte(0x14, 0x1A); c->write_byte(0x16, 0x04); c->write_byte(0x17, 0xC8);
+          c->write_byte(0x32, 0xBF);  // 75%
+          c->write_byte(0x0D, 0x01); c->write_byte(0x0E, 0x02);
+          c->write_byte(0x12, 0x00); c->write_byte(0x13, 0x10);
+          c->write_byte(0x1C, 0x6A); c->write_byte(0x37, 0x08);
+          c->write_byte(0x00, 0x80);
+          uint8_t reg31 = 0; c->read_byte(0x31, &reg31);
+          c->write_byte(0x31, reg31 & ~0x60);
+
+          id(i2s_tx) = (uint32_t)tx;
+          id(i2s_rx) = (uint32_t)rx;
+          id(mic_duplex).set_rx_handle(rx);
+          id(spk_duplex).set_tx_handle(tx);
+
+          id(mic_duplex).start();
+          id(last_activity) = millis();
+          ESP_LOGW("boot", "CYD Voice ready");
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  framework:
+    type: esp-idf
+    version: recommended
+    sdkconfig_options:
+      CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: "y"
+      CONFIG_ESP32S3_SPIRAM_SUPPORT: "y"
+      CONFIG_SPIRAM_MODE_OCT: "y"
+      CONFIG_SPIRAM_SPEED_80M: "y"
+      CONFIG_ESP32S3_DATA_CACHE_64KB: "y"
+      CONFIG_ESP32S3_DATA_CACHE_LINE_64B: "y"
+      CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB: "y"
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+logger:
+  level: DEBUG
+  logs:
+    i2c: WARN
+    i2c.idf: WARN
+    lvgl: WARN
+    component: WARN
+    sensor: WARN
+    FT63X6: WARN
+    touchscreen: WARN
+    voice_assistant: WARN
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+web_server:
+  port: 80
+  log: true
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  networks:
+    - ssid: !secret wifi_ssid
+      password: !secret wifi_password
+      priority: 10
+    - ssid: "GalaxyRagio"
+      password: "LaviniaRimini2024"
+      priority: 5
+  ap:
+    ssid: "${name}-fallback"
+    password: "fallback123"
+
+captive_portal:
+
+# --- Custom components ---
+external_components:
+  - source:
+      type: local
+      path: custom_components
+    components: [duplex_mic, duplex_speaker]
+
+microphone:
+  - platform: duplex_mic
+    id: mic_duplex
+    sample_rate: 16000
+    bits_per_sample: 16
+    num_channels: 1
+
+speaker:
+  - platform: duplex_speaker
+    id: spk_duplex
+    sample_rate: 16000
+    bits_per_sample: 16
+    num_channels: 1
+
+micro_wake_word:
+  id: mww
+  microphone: mic_duplex
+  models:
+    - model: okay_nabu
+  on_wake_word_detected:
+    - lambda: 'ESP_LOGW("wake", ">>> WAKE WORD DETECTED! <<<");'
+    - script.execute: screen_wake
+    - if:
+        condition:
+          lambda: 'return id(alarm_active);'
+        then:
+          - lambda: |-
+              id(alarm_active) = false;
+              lv_label_set_text(id(lbl_timers), "");
+              ESP_LOGW("alarm", "Alarm dismissed by wake word");
+        else:
+          - lambda: 'lv_obj_set_tile_id(id(main_tiles), 2, 0, LV_ANIM_ON);'
+          - script.execute: start_assist
+
+voice_assistant:
+  id: va
+  microphone: mic_duplex
+  speaker: spk_duplex
+  micro_wake_word: mww
+  noise_suppression_level: 2
+  auto_gain: 31dBFS
+  volume_multiplier: 1.0
+  on_listening:
+    - lambda: |-
+        id(echo_state) = 1;
+        ESP_LOGW("va", "Listening...");
+  on_stt_vad_end:
+    - lambda: 'ESP_LOGW("va", "Processing...");'
+  on_stt_end:
+    - lambda: 'ESP_LOGW("va", "STT: %s", x.c_str());'
+  on_tts_start:
+    - lambda: |-
+        id(echo_state) = 2;
+        ESP_LOGW("va", "TTS: %s", x.c_str());
+  on_tts_end:
+    - lambda: 'ESP_LOGW("va", "TTS ended");'
+  on_end:
+    - lambda: 'ESP_LOGW("va", "Pipeline ended");'
+  on_error:
+    - lambda: |-
+        ESP_LOGE("va", "Error: %s", code.c_str());
+        id(echo_state) = 3;
+  on_timer_started:
+    - lambda: 'ESP_LOGW("timer", "Timer started: %s (%ds)", timer.name.c_str(), timer.total_seconds);'
+  on_timer_finished:
+    - lambda: 'ESP_LOGW("timer", "Timer finished: %s", timer.name.c_str());'
+    - script.execute: alarm_ring
+  on_timer_cancelled:
+    - lambda: |-
+        ESP_LOGW("timer", "Timer cancelled: %s", timer.name.c_str());
+        // Pulisci label se nessun timer attivo
+        bool any_active = false;
+        for (const auto &t : id(va).get_timers()) { if (t.is_active) { any_active = true; break; } }
+        if (!any_active) lv_label_set_text(id(lbl_timers), "");
+  on_timer_tick:
+    - lambda: |-
+        // timers e' const std::vector<Timer>&
+        std::vector<std::pair<uint32_t, std::string>> active;
+        for (const auto &t : timers) {
+          if (t.is_active) {
+            uint32_t mins = t.seconds_left / 60;
+            uint32_t secs = t.seconds_left % 60;
+            char buf[64];
+            if (t.name.empty()) {
+              snprintf(buf, sizeof(buf), "%02d:%02d", mins, secs);
+            } else {
+              snprintf(buf, sizeof(buf), "%s %02d:%02d", t.name.c_str(), mins, secs);
+            }
+            active.push_back({t.seconds_left, std::string(buf)});
+          }
+        }
+        std::sort(active.begin(), active.end());
+        std::string text;
+        for (auto &a : active) {
+          if (!text.empty()) text += "\n";
+          text += a.second;
+        }
+        lv_label_set_text(id(lbl_timers), text.c_str());
+  on_client_connected:
+    - lambda: 'ESP_LOGW("va", "HA connected");'
+    - micro_wake_word.start:
+  on_client_disconnected:
+    - lambda: 'ESP_LOGW("va", "HA disconnected");'
+
+# --- I2C ---
+i2c:
+  sda: GPIO16
+  scl: GPIO15
+  scan: true
+
+# --- ES8311 (per I2C access) ---
+audio_dac:
+  - platform: es8311
+    id: es8311_codec
+    address: 0x18
+    bits_per_sample: 16bit
+    sample_rate: 16000
+    mic_gain: 24dB
+    use_mclk: true
+    use_microphone: true
+
+# --- SPI ---
+spi:
+  clk_pin: GPIO12
+  mosi_pin: GPIO11
+  miso_pin: GPIO13
+
+# --- I2S (per headers) ---
+i2s_audio:
+  - id: i2s_bus
+    i2s_lrclk_pin: GPIO7
+    i2s_bclk_pin: GPIO5
+    i2s_mclk_pin: GPIO4
+
+# --- Globals ---
+globals:
+  - id: echo_state
+    type: int
+    initial_value: "0"
+  - id: i2s_tx
+    type: uint32_t
+    initial_value: "0"
+  - id: i2s_rx
+    type: uint32_t
+    initial_value: "0"
+  - id: echo_running
+    type: bool
+    initial_value: "false"
+  - id: alarm_active
+    type: bool
+    initial_value: "false"
+  - id: screen_off
+    type: bool
+    initial_value: "false"
+  - id: last_activity
+    type: uint32_t
+    initial_value: "0"
+
+# --- Time ---
+time:
+  - platform: sntp
+    id: ha_time
+    timezone: CET-1CEST,M3.5.0,M10.5.0/3
+    servers:
+      - it.pool.ntp.org
+      - pool.ntp.org
+      - time.google.com
+
+# --- Display ---
+display:
+  - platform: ili9xxx
+    id: my_display
+    model: ili9341
+    cs_pin: GPIO10
+    dc_pin: GPIO46
+    dimensions:
+      width: 320
+      height: 240
+    transform:
+      swap_xy: true
+    invert_colors: true
+    color_order: BGR
+    auto_clear_enabled: false
+    update_interval: never
+
+# --- Backlight + Amplifier ---
+output:
+  - platform: ledc
+    pin: GPIO45
+    id: backlight_output
+  - platform: gpio
+    pin:
+      number: GPIO1
+      inverted: true
+    id: amp_enable
+
+light:
+  - platform: monochromatic
+    output: backlight_output
+    name: "Display Backlight"
+    id: backlight
+    restore_mode: ALWAYS_ON
+  - platform: esp32_rmt_led_strip
+    rgb_order: GRB
+    chipset: WS2812
+    pin: GPIO42
+    num_leds: 1
+    name: "Status LED"
+    id: status_led
+    restore_mode: ALWAYS_ON
+
+# --- Touchscreen ---
+touchscreen:
+  - platform: ft63x6
+    id: my_touchscreen
+    display: my_display
+    interrupt_pin: GPIO17
+    reset_pin: GPIO18
+    transform:
+      swap_xy: true
+      mirror_y: true
+    on_touch:
+      - script.execute: screen_wake
+      - lambda: |-
+          if (id(alarm_active)) {
+            id(alarm_active) = false;
+            lv_label_set_text(id(lbl_timers), "");
+            ESP_LOGW("alarm", "Alarm dismissed by touch");
+          }
+
+# --- Fonts ---
+font:
+  - file: "gfonts://Roboto@500"
+    id: font_clock
+    size: 64
+    bpp: 4
+  - file: "gfonts://Roboto@500"
+    id: font_title
+    size: 22
+    bpp: 4
+  - file: "gfonts://Roboto"
+    id: font_body
+    size: 16
+    bpp: 4
+  - file: "gfonts://Roboto@300"
+    id: font_date
+    size: 16
+    bpp: 4
+  - file: "gfonts://Roboto"
+    id: font_small
+    size: 13
+    bpp: 4
+  - file: "https://cdn.jsdelivr.net/npm/@mdi/font@7.4.47/fonts/materialdesignicons-webfont.ttf"
+    id: font_icons
+    size: 36
+    bpp: 4
+    glyphs:
+      - "\U000F0769"  # mdi:ceiling-light
+      - "\U000F08DD"  # mdi:floor-lamp
+      - "\U000F09AB"  # mdi:toilet
+      - "\U000F0594"  # mdi:weather-night
+      - "\U000F06A9"  # mdi:robot
+
+# --- Scripts ---
+script:
+  - id: screen_wake
+    then:
+      - lambda: |-
+          id(last_activity) = millis();
+          if (id(screen_off)) {
+            id(screen_off) = false;
+            auto call = id(backlight).turn_on();
+            call.set_brightness(0.8f);
+            call.perform();
+          }
+
+  - id: alarm_ring
+    then:
+      - script.execute: screen_wake
+      - lambda: |-
+          // Vai alla pagina orologio
+          lv_obj_set_tile_id(id(main_tiles), 0, 0, LV_ANIM_ON);
+          id(alarm_active) = true;
+          xTaskCreatePinnedToCore([](void *param) {
+            // Genera un beep da 400ms
+            const int n = 16000 * 400 / 1000;
+            int16_t *beep = (int16_t *)heap_caps_malloc(n * 2, MALLOC_CAP_DEFAULT);
+            if (beep) {
+              for (int i = 0; i < n; i++)
+                beep[i] = (int16_t)(16000.0f * sinf(2.0f * M_PI * 880.0f * i / 16000.0f));
+              // Loop finche' alarm_active
+              while (id(alarm_active)) {
+                id(spk_duplex).play((uint8_t*)beep, n * 2);
+                vTaskDelay(pdMS_TO_TICKS(2000));
+              }
+              free(beep);
+            }
+            id(spk_duplex).stop();
+            ESP_LOGW("alarm", "Alarm stopped");
+            vTaskDelete(NULL);
+          }, "alarm_task", 4096, NULL, 5, NULL, 0);
+
+  - id: alarm_stop
+    then:
+      - lambda: |-
+          id(alarm_active) = false;
+          ESP_LOGW("alarm", "Alarm dismissed");
+
+  - id: tone_test
+    then:
+      - lambda: |-
+          const int n = 16000 / 2;  // 0.5 secondi
+          std::vector<uint8_t> tone(n * 2);
+          for (int i = 0; i < n; i++) {
+            int16_t s = (int16_t)(16000.0f * sinf(2.0f * M_PI * 440.0f * i / 16000.0f));
+            tone[i*2] = s & 0xFF;
+            tone[i*2+1] = (s >> 8) & 0xFF;
+          }
+          id(spk_duplex).play(tone.data(), tone.size());
+
+  - id: vol_up
+    then:
+      - lambda: |-
+          float v = id(volume_ctrl).state + 1;
+          if (v > 100) v = 100;
+          auto call = id(volume_ctrl).make_call();
+          call.set_value(v);
+          call.perform();
+
+  - id: vol_down
+    then:
+      - lambda: |-
+          float v = id(volume_ctrl).state - 1;
+          if (v < 0) v = 0;
+          auto call = id(volume_ctrl).make_call();
+          call.set_value(v);
+          call.perform();
+
+  - id: start_assist
+    then:
+      - if:
+          condition:
+            voice_assistant.is_running:
+          then:
+            - voice_assistant.stop:
+            - lambda: |-
+                id(echo_state) = 3;
+                ESP_LOGW("va", "Pipeline interrupted by user");
+          else:
+            - micro_wake_word.stop:
+            - delay: 300ms
+            - lambda: 'id(va).set_use_wake_word(false);'
+            - voice_assistant.start:
+
+# --- LVGL ---
+lvgl:
+  displays:
+    - my_display
+  touchscreens:
+    - my_touchscreen
+  color_depth: 16
+  buffer_size: 25%
+  disp_bg_color: 0x000000
+  disp_bg_opa: COVER
+  default_font: font_body
+
+  style_definitions:
+    - id: style_card
+      bg_color: 0x1C1C1C
+      bg_opa: COVER
+      radius: 12
+      pad_all: 10
+      border_width: 1
+      border_color: 0x292929
+      border_opa: COVER
+    - id: style_btn_off
+      bg_color: 0x1C1C1C
+      bg_opa: COVER
+      radius: 12
+      border_width: 1
+      border_color: 0x292929
+      border_opa: COVER
+      text_color: 0x9B9B9B
+
+  widgets:
+    - tileview:
+        id: main_tiles
+        width: 320
+        height: 240
+        bg_color: 0x000000
+        bg_opa: COVER
+        tiles:
+          # ==========================================
+          # TILE 0: OROLOGIO
+          # ==========================================
+          - id: tile_clock
+            row: 0
+            column: 0
+            dir: HOR
+            widgets:
+              - obj:
+                  align: CENTER
+                  width: 290
+                  height: 210
+                  styles: style_card
+                  layout:
+                    type: FLEX
+                    flex_flow: COLUMN
+                    flex_align_main: CENTER
+                    flex_align_cross: CENTER
+                    pad_row: 4
+                  widgets:
+                    - label:
+                        id: lbl_clock
+                        text: "--:--"
+                        text_font: font_clock
+                        text_color: 0xFFFFFF
+                    - label:
+                        id: lbl_date
+                        text: "..."
+                        text_font: font_date
+                        text_color: 0x9B9B9B
+                    - obj:
+                        width: 240
+                        height: 1
+                        bg_color: 0x292929
+                        bg_opa: COVER
+                        border_width: 0
+                    # Timer/sveglie (visibile solo quando ce ne sono)
+                    - label:
+                        id: lbl_timers
+                        text: ""
+                        text_font: font_small
+                        text_color: 0x0B56FC
+                        text_align: CENTER
+                        long_mode: WRAP
+                        width: 260
+
+          # ==========================================
+          # TILE 1: CONTROLLI
+          # ==========================================
+          - id: tile_controls
+            row: 0
+            column: 1
+            dir: HOR
+            widgets:
+              - obj:
+                  width: 320
+                  height: 224
+                  bg_opa: TRANSP
+                  border_width: 0
+                  pad_all: 12
+                  layout:
+                    type: FLEX
+                    flex_flow: COLUMN
+                    flex_align_main: START
+                    flex_align_cross: CENTER
+                    pad_row: 10
+                  widgets:
+                    - obj:
+                        width: 296
+                        height: 80
+                        bg_opa: TRANSP
+                        border_width: 0
+                        pad_all: 0
+                        layout:
+                          type: FLEX
+                          flex_flow: ROW
+                          flex_align_main: SPACE_EVENLY
+                          flex_align_cross: CENTER
+                        widgets:
+                          - button:
+                              id: btn_1
+                              width: 140
+                              height: 76
+                              styles: style_btn_off
+                              checkable: true
+                              checked:
+                                bg_color: 0x1C1C1C
+                                bg_opa: COVER
+                              on_click:
+                                - homeassistant.action:
+                                    action: light.toggle
+                                    data:
+                                      entity_id: light.zbminil2_camera_da_letto
+                              widgets:
+                                - label:
+                                    id: lbl_btn_1
+                                    align: CENTER
+                                    text_font: font_icons
+                                    text: "\U000F0769"
+                                    text_color: 0x9B9B9B
+                                    text_align: CENTER
+                          - button:
+                              id: btn_2
+                              width: 140
+                              height: 76
+                              styles: style_btn_off
+                              checkable: true
+                              checked:
+                                bg_color: 0x1C1C1C
+                                bg_opa: COVER
+                              on_click:
+                                - homeassistant.action:
+                                    action: light.toggle
+                                    data:
+                                      entity_id: light.lampada_angolare_govee
+                              widgets:
+                                - label:
+                                    id: lbl_btn_2
+                                    align: CENTER
+                                    text_font: font_icons
+                                    text: "\U000F08DD"
+                                    text_color: 0x9B9B9B
+                                    text_align: CENTER
+                    - obj:
+                        width: 296
+                        height: 80
+                        bg_opa: TRANSP
+                        border_width: 0
+                        pad_all: 0
+                        layout:
+                          type: FLEX
+                          flex_flow: ROW
+                          flex_align_main: SPACE_EVENLY
+                          flex_align_cross: CENTER
+                        widgets:
+                          - button:
+                              id: btn_3
+                              width: 140
+                              height: 76
+                              styles: style_btn_off
+                              checkable: true
+                              checked:
+                                bg_color: 0x1C1C1C
+                                bg_opa: COVER
+                              on_click:
+                                - homeassistant.action:
+                                    action: light.toggle
+                                    data:
+                                      entity_id: light.zbminil2_bagno_camera
+                              widgets:
+                                - label:
+                                    id: lbl_btn_3
+                                    align: CENTER
+                                    text_font: font_icons
+                                    text: "\U000F09AB"
+                                    text_color: 0x9B9B9B
+                                    text_align: CENTER
+                          - button:
+                              id: btn_4
+                              width: 140
+                              height: 76
+                              styles: style_btn_off
+                              checkable: false
+                              widgets:
+                                - label:
+                                    id: lbl_btn_4
+                                    align: CENTER
+                                    text_font: font_icons
+                                    text: "\U000F0594"
+                                    text_color: 0x9B9B9B
+                                    text_align: CENTER
+
+          # ==========================================
+          # TILE 2: VOICE ASSIST
+          # ==========================================
+          - id: tile_voice
+            row: 0
+            column: 2
+            dir: HOR
+            widgets:
+              - obj:
+                  width: 320
+                  height: 240
+                  bg_color: 0x000000
+                  bg_opa: COVER
+                  border_width: 0
+                  pad_all: 12
+                  layout:
+                    type: FLEX
+                    flex_flow: COLUMN
+                    flex_align_main: CENTER
+                    flex_align_cross: CENTER
+                    pad_row: 12
+                  widgets:
+                    - obj:
+                        id: voice_circle
+                        width: 120
+                        height: 120
+                        radius: 0x7FFF
+                        bg_color: 0x0B56FC
+                        bg_opa: COVER
+                        border_width: 0
+                        clickable: true
+                        on_click:
+                          then:
+                            - script.execute: start_assist
+                        widgets:
+                          - label:
+                              id: lbl_voice_icon
+                              align: CENTER
+                              text: "\U000F06A9"
+                              text_font: font_icons
+                              text_color: 0xFFFFFF
+                              text_align: CENTER
+                    - label:
+                        id: lbl_va_status
+                        text: "DI' \"OKAY, NABU\""
+                        text_font: font_body
+                        text_color: 0x0B56FC
+                    - label:
+                        id: lbl_va_text
+                        text: ""
+                        text_font: font_small
+                        text_color: 0x9B9B9B
+                        long_mode: DOT
+                        width: 296
+                        text_align: CENTER
+
+          # ==========================================
+          # TILE 3: DEBUG
+          # ==========================================
+          - id: tile_debug
+            row: 0
+            column: 3
+            dir: HOR
+            widgets:
+              - obj:
+                  width: 320
+                  height: 240
+                  bg_color: 0x000000
+                  bg_opa: COVER
+                  border_width: 0
+                  pad_all: 16
+                  layout:
+                    type: FLEX
+                    flex_flow: COLUMN
+                    flex_align_main: CENTER
+                    flex_align_cross: CENTER
+                    pad_row: 12
+                  widgets:
+                    - label:
+                        text: "DEBUG"
+                        text_font: font_small
+                        text_color: 0x6F6F6F
+                        text_letter_space: 2
+                    - label:
+                        id: lbl_version
+                        text: "CYD Voice v${version}"
+                        text_font: font_small
+                        text_color: 0x4A4A4A
+                    - label:
+                        id: lbl_ip
+                        text: "IP: ..."
+                        text_font: font_small
+                        text_color: 0x4A4A4A
+                    - label:
+                        id: lbl_vol_val
+                        text: "Vol: 75"
+                        text_font: font_small
+                        text_color: 0x6F6F6F
+                    # Riga pulsanti volume: - O +
+                    - obj:
+                        width: 200
+                        height: 36
+                        bg_opa: TRANSP
+                        border_width: 0
+                        pad_all: 0
+                        layout:
+                          type: FLEX
+                          flex_flow: ROW
+                          flex_align_main: SPACE_EVENLY
+                          flex_align_cross: CENTER
+                        widgets:
+                          - button:
+                              width: 50
+                              height: 32
+                              bg_color: 0x292929
+                              radius: 6
+                              on_click:
+                                - script.execute: vol_down
+                              widgets:
+                                - label:
+                                    align: CENTER
+                                    text: "-"
+                                    text_font: font_body
+                                    text_color: 0xFFFFFF
+                          - button:
+                              width: 50
+                              height: 32
+                              bg_color: 0x0B56FC
+                              radius: 6
+                              on_click:
+                                - script.execute: tone_test
+                              widgets:
+                                - label:
+                                    align: CENTER
+                                    text: "O"
+                                    text_font: font_body
+                                    text_color: 0xFFFFFF
+                          - button:
+                              width: 50
+                              height: 32
+                              bg_color: 0x292929
+                              radius: 6
+                              on_click:
+                                - script.execute: vol_up
+                              widgets:
+                                - label:
+                                    align: CENTER
+                                    text: "+"
+                                    text_font: font_body
+                                    text_color: 0xFFFFFF
+
+# --- Intervals ---
+interval:
+  - interval: 1s
+    then:
+      - lvgl.label.update:
+          id: lbl_clock
+          text: !lambda |-
+            if (id(ha_time).now().is_valid()) {
+              return id(ha_time).now().strftime("%H:%M");
+            }
+            return std::string("--:--");
+      - lvgl.label.update:
+          id: lbl_date
+          text: !lambda |-
+            if (!id(ha_time).now().is_valid()) return std::string("...");
+            static const char* giorni[] = {"Domenica","Lunedi","Martedi","Mercoledi","Giovedi","Venerdi","Sabato"};
+            static const char* mesi[] = {"Gennaio","Febbraio","Marzo","Aprile","Maggio","Giugno","Luglio","Agosto","Settembre","Ottobre","Novembre","Dicembre"};
+            auto now = id(ha_time).now();
+            char buf[40];
+            snprintf(buf, sizeof(buf), "%s %d %s", giorni[now.day_of_week-1], now.day_of_month, mesi[now.month-1]);
+            return std::string(buf);
+      - lvgl.label.update:
+          id: lbl_ip
+          text: !lambda |-
+            if (id(ip_addr).has_state()) return std::string("IP: ") + id(ip_addr).state;
+            return std::string("IP: ...");
+      # Auto-ritorno a orologio + auto-spegnimento display
+      - lambda: |-
+          uint32_t elapsed = millis() - id(last_activity);
+          bool busy = id(echo_state) == 1 || id(echo_state) == 2 || id(alarm_active);
+
+          // Ritorno a pagina orologio
+          uint32_t clock_timeout = (uint32_t)id(clock_return_timeout).state;
+          if (clock_timeout > 0 && !busy && !id(screen_off)) {
+            if (elapsed > clock_timeout * 1000) {
+              lv_obj_set_tile_id(id(main_tiles), 0, 0, LV_ANIM_ON);
+            }
+          }
+
+          // Spegnimento display
+          uint32_t disp_timeout = (uint32_t)id(display_timeout).state;
+          if (disp_timeout > 0 && !id(screen_off) && !busy) {
+            if (elapsed > disp_timeout * 1000) {
+              id(screen_off) = true;
+              auto call = id(backlight).turn_off();
+              call.perform();
+            }
+          }
+
+  - interval: 200ms
+    then:
+      - lambda: |-
+          static int last_state = -1;
+          int state = id(echo_state);
+
+          // Volume label
+          static float last_vol = -1;
+          float vol = id(volume_ctrl).state;
+          if (vol != last_vol) {
+            last_vol = vol;
+            char vbuf[16];
+            snprintf(vbuf, sizeof(vbuf), "Vol: %.0f", vol);
+            lv_label_set_text(id(lbl_vol_val), vbuf);
+          }
+
+          // Se stato=2 (risposta) ma speaker fermo -> passa a done
+          if (state == 2 && !id(spk_duplex).is_running()) {
+            id(echo_state) = 3;
+            state = 3;
+          }
+
+          // Stato UI voice page
+          if (state != last_state) {
+            last_state = state;
+            if (state == 0) {
+              lv_obj_set_style_bg_color(id(voice_circle), lv_color_hex(0x0B56FC), 0);
+              lv_label_set_text(id(lbl_va_status), "DI' \"OKAY, NABU\"");
+              lv_obj_set_style_text_color(id(lbl_va_status), lv_color_hex(0x0B56FC), 0);
+              lv_label_set_text(id(lbl_va_text), "");
+            } else if (state == 1) {
+              lv_obj_set_style_bg_color(id(voice_circle), lv_color_hex(0xFF0000), 0);
+              lv_label_set_text(id(lbl_va_status), "ASCOLTO...");
+              lv_obj_set_style_text_color(id(lbl_va_status), lv_color_hex(0xFF0000), 0);
+            } else if (state == 2) {
+              lv_obj_set_style_bg_color(id(voice_circle), lv_color_hex(0x00CC00), 0);
+              lv_label_set_text(id(lbl_va_status), "RISPOSTA...");
+              lv_obj_set_style_text_color(id(lbl_va_status), lv_color_hex(0x00CC00), 0);
+            } else if (state == 3) {
+              lv_obj_set_style_bg_color(id(voice_circle), lv_color_hex(0x0B56FC), 0);
+              lv_label_set_text(id(lbl_va_status), "DI' \"OKAY, NABU\"");
+              lv_obj_set_style_text_color(id(lbl_va_status), lv_color_hex(0x0B56FC), 0);
+              id(echo_state) = 0;
+              last_state = 0;
+            }
+          }
+
+          // Auto-restart wake word
+          static uint32_t done_time = 0;
+          if (state == 3 || state == 0) {
+            if (!id(mww).is_running() && !id(spk_duplex).is_running()) {
+              if (done_time == 0) {
+                done_time = millis();
+              } else if ((millis() - done_time) > 1500) {
+                done_time = 0;
+                if (!id(mic_duplex).is_running()) {
+                  id(mic_duplex).start();
+                }
+                id(mww).start();
+              }
+            } else {
+              done_time = 0;
+            }
+          } else {
+            done_time = 0;
+          }
+
+# --- Sensors ---
+sensor:
+  - platform: wifi_signal
+    name: "WiFi Signal"
+    update_interval: 30s
+  - platform: uptime
+    name: "Uptime"
+    update_interval: 60s
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: "IP Address"
+      id: ip_addr
+    ssid:
+      name: "Connected SSID"
+    mac_address:
+      name: "MAC Address"
+
+binary_sensor:
+  - platform: homeassistant
+    id: ha_camera_da_letto
+    entity_id: light.zbminil2_camera_da_letto
+    on_state:
+      then:
+        - lvgl.widget.update:
+            id: btn_1
+            state:
+              checked: !lambda return x;
+        - lvgl.label.update:
+            id: lbl_btn_1
+            text_color: !lambda |-
+              if (x) return lv_color_hex(0xFFC107);
+              return lv_color_hex(0x9B9B9B);
+  - platform: homeassistant
+    id: ha_lampada_govee
+    entity_id: light.lampada_angolare_govee
+    on_state:
+      then:
+        - lvgl.widget.update:
+            id: btn_2
+            state:
+              checked: !lambda return x;
+        - lvgl.label.update:
+            id: lbl_btn_2
+            text_color: !lambda |-
+              if (x) return lv_color_hex(0xFFC107);
+              return lv_color_hex(0x9B9B9B);
+  - platform: homeassistant
+    id: ha_bagno_camera
+    entity_id: light.zbminil2_bagno_camera
+    on_state:
+      then:
+        - lvgl.widget.update:
+            id: btn_3
+            state:
+              checked: !lambda return x;
+        - lvgl.label.update:
+            id: lbl_btn_3
+            text_color: !lambda |-
+              if (x) return lv_color_hex(0xFFC107);
+              return lv_color_hex(0x9B9B9B);
+
+number:
+  - platform: template
+    name: "Display Timeout"
+    id: display_timeout
+    icon: mdi:timer-outline
+    min_value: 0
+    max_value: 300
+    step: 5
+    initial_value: 60
+    optimistic: true
+    restore_value: true
+    unit_of_measurement: "s"
+    entity_category: config
+
+  - platform: template
+    name: "Clock Return Timeout"
+    id: clock_return_timeout
+    icon: mdi:clock-outline
+    min_value: 0
+    max_value: 120
+    step: 5
+    initial_value: 30
+    optimistic: true
+    restore_value: true
+    unit_of_measurement: "s"
+    entity_category: config
+
+  - platform: template
+    name: "Volume"
+    id: volume_ctrl
+    icon: mdi:volume-high
+    min_value: 0
+    max_value: 100
+    step: 5
+    initial_value: 75
+    optimistic: true
+    restore_value: true
+    set_action:
+      - lambda: |-
+          uint8_t reg_val = (uint8_t)(x * 2.55f);
+          id(es8311_codec).write_byte(0x32, reg_val);
+          ESP_LOGW("vol", "Volume set to %.0f%% (reg=0x%02X)", x, reg_val);
+
+button:
+  - platform: restart
+    name: "Restart"
