@@ -202,38 +202,33 @@ docker exec esphome esphome config satellite-test.yaml
 ## Stato attuale (2026-03-28)
 
 ### Firmware
-- **`voice-test.yaml`** (v0.4.10) — Voice assistant HA completo: wake word + STT + TTS + volume + tap-to-talk
-- **`audio-test.yaml`** (v0.3.1) — Test audio standalone: tono, echo, wake word + VAD echo
-- **`satellite-test.yaml`** — LVGL 3 pagine (orologio, controlli luci, voice placeholder) — da unificare con voice-test
-
-### Completati
-- [x] Board ricevuta e testata (board test via web flasher Freenove)
-- [x] Container ESPHome avviato (`docker compose up -d`)
-- [x] Display LVGL landscape 320x240 con colori HA dark mode corretti
-- [x] Touch funzionante con coordinate corrette
-- [x] Pagina orologio + controlli luci + voice (in satellite-test.yaml)
-- [x] **Audio speaker funzionante** (raw ESP-IDF I2S duplex + init manuale ES8311)
-- [x] **Audio microfono funzionante** (I2S RX duplex, MEMS via ES8311 ADC)
-- [x] **Amplificatore FM8002E** funzionante (GPIO1 active LOW, inverted)
-- [x] **Wake word "okay nabu"** funzionante (micro_wake_word + custom duplex_mic component)
-- [x] **Echo test con VAD** funzionante (registra finche' c'e' voce, riproduce)
-- [x] **Livello mic RMS** mostrato in tempo reale sul display
-- [x] WiFi dual (casa + hotspot GalaxyRagio) per test fuori casa
-- [x] Share Samba `\\ragio-server\esphome` per accesso firmware da Windows
+- **`cyd-voice.yaml`** (v0.5.7) — Firmware unificato LVGL 4 pagine + Voice Assistant HA completo
+- **`audio-test.yaml`** (v0.3.1) — Test audio standalone (mantenuto per debug)
+- **`voice-test.yaml`** (v0.4.10) — Test voice assistant (superato da cyd-voice)
+- **`satellite-test.yaml`** — Precedente firmware LVGL (superato da cyd-voice)
 
 ### Completati (2026-03-28)
-- [x] Custom speaker component (`duplex_speaker`) wrappa I2S TX duplex
-- [x] Voice assistant HA funzionante (wake word + STT OpenAI + TTS OpenAI)
-- [x] Tap-to-talk (pulsante display avvia Assist)
-- [x] Continued conversation (HA riattiva ascolto su domande)
-- [x] Volume controllabile da HA (number entity → ES8311 registro 0x32)
-- [x] UI stati: blu (pronto) → rosso (ascolto) → verde (risposta) → blu
-- [x] Auto-restart wake word dopo ogni ciclo
+- [x] Audio speaker + microfono funzionante (raw ESP-IDF I2S duplex + ES8311 init manuale)
+- [x] Amplificatore FM8002E (GPIO1 active LOW, inverted)
+- [x] Custom components: `duplex_mic` + `duplex_speaker` (wrappano I2S duplex)
+- [x] Wake word "okay nabu" locale (micro_wake_word)
+- [x] Voice assistant HA completo (STT + TTS OpenAI, continued conversation)
+- [x] Tap-to-talk + tap per interrompere pipeline
+- [x] Timer/sveglie con countdown live e allarme continuo (stop al tocco/wake word)
+- [x] LVGL 4 pagine: orologio, controlli luci, voice assist, debug
+- [x] Auto-ritorno orologio (30s) + auto-spegnimento display (60s)
+- [x] Volume, timeout persistenti (restore_value)
+- [x] Wake word accende schermo e naviga a pagina voice
+- [x] Timer scaduto accende schermo e naviga a pagina orologio
+- [x] WiFi dual (casa + hotspot GalaxyRagio)
+- [x] Share Samba `\\ragio-server\esphome`
+- [x] OTA via Tailscale subnet routing (PC Windows come bridge)
 
-### Prossimi passi
-1. [ ] Unificare voice-test.yaml e satellite-test.yaml (LVGL 3 pagine + voice)
-2. [ ] Rinominare firmware a nome stanza definitivo
-3. [ ] Configurare pipeline Assist dedicata in HA
-4. [ ] Aggiungere `device_id` del nuovo satellite al mapping degli intent
-5. [ ] Implementare intent `MostraTelecamera` e `CercaWeb` con il `device_id`
-6. [ ] Valutare media_player per TTS (richiede rete locale, non funziona via hotspot)
+### Prossimi passi verso v1.0
+1. [ ] Pulsanti controlli personalizzabili da HA (entity_id + icona configurabili)
+2. [ ] Test stabilita' prolungati
+3. [ ] Rimuovere pagina debug / webserver per produzione
+4. [ ] Pipeline Assist dedicata in HA
+5. [ ] Pubblicazione progetto (README, documentazione custom components)
+6. [ ] Aggiungere `device_id` del satellite al mapping intent HA
+7. [ ] Implementare intent `MostraTelecamera` e `CercaWeb`
