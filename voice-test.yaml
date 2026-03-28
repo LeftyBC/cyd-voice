@@ -1,7 +1,7 @@
 substitutions:
   name: "voice-test"
   friendly_name: "Voice Test"
-  version: "0.4.6"
+  version: "0.4.10"
 
 esphome:
   name: ${name}
@@ -180,12 +180,7 @@ micro_wake_word:
     - model: okay_nabu
   on_wake_word_detected:
     - lambda: 'ESP_LOGW("wake", ">>> WAKE WORD DETECTED! <<<");'
-    - micro_wake_word.stop:
-    - delay: 300ms
-    - lambda: |-
-        id(va).set_use_wake_word(false);
-    - voice_assistant.start:
-        wake_word: !lambda return wake_word;
+    - script.execute: start_assist
 
 voice_assistant:
   id: va
@@ -208,14 +203,9 @@ voice_assistant:
         id(echo_state) = 2;
         ESP_LOGW("va", "TTS: %s", x.c_str());
   on_tts_end:
-    - lambda: 'ESP_LOGW("va", "TTS audio received");'
+    - lambda: 'ESP_LOGW("va", "TTS ended");'
   on_end:
-    - lambda: |-
-        ESP_LOGW("va", "Pipeline ended");
-  on_tts_stream_end:
-    - lambda: |-
-        ESP_LOGW("va", "TTS stream ended");
-        id(echo_state) = 3;
+    - lambda: 'ESP_LOGW("va", "Pipeline ended");'
   on_error:
     - lambda: |-
         ESP_LOGE("va", "Error: %s", code.c_str());
@@ -355,6 +345,20 @@ font:
 
 # --- Scripts ---
 script:
+  # Avvia assist (da tap o da wake word)
+  - id: start_assist
+    then:
+      - if:
+          condition:
+            voice_assistant.is_running:
+          then:
+            - voice_assistant.stop:
+          else:
+            - micro_wake_word.stop:
+            - delay: 300ms
+            - lambda: 'id(va).set_use_wake_word(false);'
+            - voice_assistant.start:
+
   # VAD ECHO: registra con VAD, riproduci via custom speaker
   - id: vad_echo
     then:
@@ -588,7 +592,7 @@ lvgl:
               clickable: true
               on_click:
                 then:
-                  - script.execute: echo_manual
+                  - script.execute: start_assist
               widgets:
                 - label:
                     align: CENTER
@@ -599,13 +603,13 @@ lvgl:
           # Label stato
           - label:
               id: lbl_status
-              text: "PRONTO"
+              text: "DI' \"OKAY, NABU\""
               text_font: font_body
               text_color: 0x0B56FC
           # Label dettaglio
           - label:
               id: lbl_detail
-              text: "Okay Nabu per attivare"
+              text: ""
               text_font: font_small
               text_color: 0x4A4A4A
               long_mode: DOT
@@ -647,7 +651,7 @@ interval:
             last_state = state;
             if (state == 0) {
               lv_obj_set_style_bg_color(id(echo_circle), lv_color_hex(0x0B56FC), 0);
-              lv_label_set_text(id(lbl_status), "PRONTO");
+              lv_label_set_text(id(lbl_status), "DI' \"OKAY, NABU\"");
               lv_obj_set_style_text_color(id(lbl_status), lv_color_hex(0x0B56FC), 0);
             } else if (state == 1) {
               lv_obj_set_style_bg_color(id(echo_circle), lv_color_hex(0xFF0000), 0);
@@ -659,11 +663,17 @@ interval:
               lv_obj_set_style_text_color(id(lbl_status), lv_color_hex(0x00CC00), 0);
             } else if (state == 3) {
               lv_obj_set_style_bg_color(id(echo_circle), lv_color_hex(0x0B56FC), 0);
-              lv_label_set_text(id(lbl_status), "PRONTO");
+              lv_label_set_text(id(lbl_status), "DI' \"OKAY, NABU\"");
               lv_obj_set_style_text_color(id(lbl_status), lv_color_hex(0x0B56FC), 0);
               id(echo_state) = 0;
               last_state = 0;
             }
+          }
+
+          // Se stato=2 (risposta) ma speaker fermo -> passa a done
+          if (state == 2 && !id(spk_duplex).is_running()) {
+            id(echo_state) = 3;
+            state = 3;
           }
 
           // Auto-restart wake word se fermo e speaker fermo
@@ -703,6 +713,22 @@ sensor:
   - platform: wifi_signal
     name: "WiFi Signal"
     update_interval: 30s
+
+number:
+  - platform: template
+    name: "Volume"
+    id: volume_ctrl
+    icon: mdi:volume-high
+    min_value: 0
+    max_value: 100
+    step: 5
+    initial_value: 85
+    optimistic: true
+    set_action:
+      - lambda: |-
+          uint8_t reg_val = (uint8_t)(x * 2.55f);  // 0-100 -> 0-255
+          id(es8311_codec).write_byte(0x32, reg_val);
+          ESP_LOGW("vol", "Volume set to %.0f%% (reg=0x%02X)", x, reg_val);
 
 button:
   - platform: restart
