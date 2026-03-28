@@ -1,0 +1,802 @@
+substitutions:
+  name: "satellite-test"
+  friendly_name: "Satellite Test"
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  platformio_options:
+    board_build.flash_mode: dio
+    board_build.flash_size: 16MB
+  on_boot:
+    priority: -100
+    then:
+      - light.turn_on:
+          id: backlight
+          brightness: 80%
+      - output.turn_off: amp_enable
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  framework:
+    type: esp-idf
+    version: recommended
+    sdkconfig_options:
+      CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: "y"
+      CONFIG_ESP32S3_SPIRAM_SUPPORT: "y"
+      CONFIG_SPIRAM_MODE_OCT: "y"
+      CONFIG_SPIRAM_SPEED_80M: "y"
+      CONFIG_ESP32S3_DATA_CACHE_64KB: "y"
+      CONFIG_ESP32S3_DATA_CACHE_LINE_64B: "y"
+      CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB: "y"
+      CONFIG_SPIRAM_RODATA: "y"
+      CONFIG_SPIRAM_FETCH_INSTRUCTIONS: "y"
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+logger:
+  level: DEBUG
+  logs:
+    micro_wake_word: DEBUG
+    i2s_audio: DEBUG
+    es8311: DEBUG
+    voice_assistant: DEBUG
+    lvgl: WARN
+    component: WARN
+    sensor: WARN
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+web_server:
+  port: 80
+  log: true
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  networks:
+    - ssid: !secret wifi_ssid
+      password: !secret wifi_password
+      priority: 10
+    - ssid: "GalaxyRagio"
+      password: "LaviniaRimini2024"
+      priority: 5
+  ap:
+    ssid: "${name}-fallback"
+    password: "fallback123"
+
+captive_portal:
+
+# --- I2C bus (shared: touch FT6336 + audio codec ES8311) ---
+i2c:
+  sda: GPIO16
+  scl: GPIO15
+  scan: true
+
+# --- Audio codec ES8311 (I2C + audio_dac platform) ---
+audio_dac:
+  - platform: es8311
+    id: es8311_codec
+    address: 0x18
+    bits_per_sample: 16bit
+    sample_rate: 48000
+    mic_gain: 42dB
+    use_mclk: true
+    use_microphone: true
+
+# --- SPI bus (display ILI9341) ---
+spi:
+  clk_pin: GPIO12
+  mosi_pin: GPIO11
+  miso_pin: GPIO13
+
+# --- I2S audio bus ---
+i2s_audio:
+  - id: i2s_bus
+    i2s_lrclk_pin: GPIO7
+    i2s_bclk_pin: GPIO5
+    i2s_mclk_pin: GPIO4
+
+# --- Time (SNTP + HA fallback) ---
+time:
+  - platform: sntp
+    id: ha_time
+    timezone: CET-1CEST,M3.5.0,M10.5.0/3
+    servers:
+      - it.pool.ntp.org
+      - pool.ntp.org
+      - time.google.com
+
+# --- Display ILI9341 — landscape 320x240 ---
+display:
+  - platform: ili9xxx
+    id: my_display
+    model: ili9341
+    cs_pin: GPIO10
+    dc_pin: GPIO46
+    dimensions:
+      width: 320
+      height: 240
+    transform:
+      swap_xy: true
+    invert_colors: true
+    color_order: BGR
+    auto_clear_enabled: false
+    update_interval: never
+
+# --- Backlight ---
+output:
+  - platform: ledc
+    pin: GPIO45
+    id: backlight_output
+  - platform: gpio
+    pin: GPIO1
+    id: amp_enable
+
+light:
+  - platform: monochromatic
+    output: backlight_output
+    name: "Display Backlight"
+    id: backlight
+    restore_mode: ALWAYS_ON
+
+  - platform: esp32_rmt_led_strip
+    rgb_order: GRB
+    chipset: WS2812
+    pin: GPIO42
+    num_leds: 1
+    name: "Status LED"
+    id: status_led
+    restore_mode: ALWAYS_ON
+
+# --- Microphone (MEMS via ES8311 codec, I2S DIN) ---
+microphone:
+  - platform: i2s_audio
+    id: mic_i2s
+    i2s_audio_id: i2s_bus
+    adc_type: external
+    i2s_din_pin: GPIO6
+    pdm: false
+    bits_per_sample: 16bit
+    channel: left
+    sample_rate: 16000
+
+# --- Speaker (via ES8311 codec + FM8002E amplifier, I2S DOUT) ---
+speaker:
+  - platform: i2s_audio
+    id: spk_i2s
+    i2s_audio_id: i2s_bus
+    dac_type: external
+    i2s_dout_pin: GPIO8
+    channel: left
+    sample_rate: 48000
+    bits_per_sample: 16bit
+    audio_dac: es8311_codec
+    buffer_duration: 100ms
+
+# --- Touchscreen FT6336 — landscape ---
+touchscreen:
+  - platform: ft63x6
+    id: my_touchscreen
+    display: my_display
+    interrupt_pin: GPIO17
+    reset_pin: GPIO18
+    transform:
+      swap_xy: true
+      mirror_y: true
+
+# --- Fonts (bpp: 4 for LVGL anti-aliasing) ---
+font:
+  - file: "gfonts://Roboto@500"
+    id: font_clock
+    size: 64
+    bpp: 4
+  - file: "gfonts://Roboto@500"
+    id: font_title
+    size: 22
+    bpp: 4
+  - file: "gfonts://Roboto"
+    id: font_body
+    size: 16
+    bpp: 4
+  - file: "gfonts://Roboto@300"
+    id: font_date
+    size: 16
+    bpp: 4
+  - file: "gfonts://Roboto"
+    id: font_small
+    size: 13
+    bpp: 4
+  - file: "https://cdn.jsdelivr.net/npm/@mdi/font@7.4.47/fonts/materialdesignicons-webfont.ttf"
+    id: font_icons
+    size: 36
+    bpp: 4
+    glyphs:
+      - "\U000F0769"  # mdi:ceiling-light
+      - "\U000F08DD"  # mdi:floor-lamp
+      - "\U000F09AB"  # mdi:toilet
+      - "\U000F0594"  # mdi:weather-night
+
+# --- Media player (wraps speaker per voice_assistant) ---
+media_player:
+  - platform: speaker
+    name: None
+    id: media_player_spk
+    volume_min: 0.4
+    volume_max: 0.85
+    announcement_pipeline:
+      speaker: spk_i2s
+      format: FLAC
+      sample_rate: 48000
+      num_channels: 1
+
+# --- Wake word locale ---
+micro_wake_word:
+  id: mww
+  models:
+    - model: hey_jarvis
+  on_wake_word_detected:
+    - output.turn_on: amp_enable
+    - voice_assistant.start:
+        wake_word: !lambda return wake_word;
+
+# --- Voice assistant (pipeline Assist di HA) ---
+voice_assistant:
+  id: va
+  microphone: mic_i2s
+  media_player: media_player_spk
+  micro_wake_word: mww
+  noise_suppression_level: 2
+  auto_gain: 31dBFS
+  volume_multiplier: 2.0
+  on_listening:
+    - output.turn_on: amp_enable
+    - light.turn_on:
+        id: status_led
+        red: 100%
+        green: 0%
+        blue: 0%
+    - lvgl.label.update:
+        id: lbl_voice_state
+        text: "ASCOLTO..."
+        text_color: 0xFF0000
+    - lvgl.widget.update:
+        id: voice_circle
+        bg_color: 0xFF0000
+    - lvgl.label.update:
+        id: lbl_voice_command
+        text: ""
+    - lvgl.label.update:
+        id: lbl_voice_response
+        text: ""
+  on_stt_vad_end:
+    - lvgl.label.update:
+        id: lbl_voice_state
+        text: "ELABORAZIONE..."
+        text_color: 0xBB86FC
+    - lvgl.widget.update:
+        id: voice_circle
+        bg_color: 0xBB86FC
+    - light.turn_on:
+        id: status_led
+        red: 75%
+        green: 0%
+        blue: 100%
+  on_stt_end:
+    - lvgl.label.update:
+        id: lbl_voice_command
+        text: !lambda return x;
+  on_tts_start:
+    - lvgl.label.update:
+        id: lbl_voice_response
+        text: !lambda return x;
+    - lvgl.label.update:
+        id: lbl_voice_state
+        text: "RISPOSTA..."
+        text_color: 0x00CC00
+    - lvgl.widget.update:
+        id: voice_circle
+        bg_color: 0x00CC00
+    - light.turn_on:
+        id: status_led
+        red: 0%
+        green: 100%
+        blue: 0%
+  on_end:
+    - wait_until:
+        not:
+          speaker.is_playing:
+            id: spk_i2s
+    - output.turn_off: amp_enable
+    - light.turn_off: status_led
+    - lvgl.label.update:
+        id: lbl_voice_state
+        text: "PRONTO"
+        text_color: 0x6F6F6F
+    - lvgl.widget.update:
+        id: voice_circle
+        bg_color: 0x0B56FC
+    - script.execute: start_wake_word
+  on_error:
+    - light.turn_on:
+        id: status_led
+        red: 100%
+        green: 0%
+        blue: 0%
+    - lvgl.label.update:
+        id: lbl_voice_state
+        text: "ERRORE"
+        text_color: 0xFF0000
+    - lvgl.widget.update:
+        id: voice_circle
+        bg_color: 0xFF0000
+    - delay: 2s
+    - output.turn_off: amp_enable
+    - light.turn_off: status_led
+    - lvgl.label.update:
+        id: lbl_voice_state
+        text: "PRONTO"
+        text_color: 0x6F6F6F
+    - lvgl.widget.update:
+        id: voice_circle
+        bg_color: 0x0B56FC
+    - script.execute: start_wake_word
+  on_client_connected:
+    - script.execute: start_wake_word
+    - lvgl.label.update:
+        id: lbl_voice_state
+        text: "PRONTO"
+        text_color: 0x6F6F6F
+    - lvgl.widget.update:
+        id: voice_circle
+        bg_color: 0x0B56FC
+  on_client_disconnected:
+    - script.execute: stop_wake_word
+    - lvgl.label.update:
+        id: lbl_voice_state
+        text: "DISCONNESSO"
+        text_color: 0xFF0000
+    - lvgl.widget.update:
+        id: voice_circle
+        bg_color: 0x333333
+
+# --- Scripts ---
+script:
+  - id: start_wake_word
+    then:
+      - if:
+          condition:
+            not:
+              voice_assistant.is_running:
+          then:
+            - lambda: id(va).set_use_wake_word(false);
+            - micro_wake_word.start:
+  - id: stop_wake_word
+    then:
+      - micro_wake_word.stop:
+      - voice_assistant.stop:
+
+# --- LVGL ---
+lvgl:
+  displays:
+    - my_display
+  touchscreens:
+    - my_touchscreen
+  color_depth: 16
+  buffer_size: 25%
+  disp_bg_color: 0x000000
+  disp_bg_opa: COVER
+  default_font: font_body
+
+  style_definitions:
+    - id: style_card
+      bg_color: 0x1C1C1C
+      bg_opa: COVER
+      radius: 12
+      pad_all: 10
+      border_width: 1
+      border_color: 0x292929
+      border_opa: COVER
+    - id: style_btn_on
+      bg_color: 0x0B56FC
+      bg_opa: COVER
+      radius: 12
+      text_color: 0xFFFFFF
+    - id: style_btn_off
+      bg_color: 0x1C1C1C
+      bg_opa: COVER
+      radius: 12
+      border_width: 1
+      border_color: 0x292929
+      border_opa: COVER
+      text_color: 0x9B9B9B
+
+  widgets:
+    - tileview:
+        id: main_tiles
+        width: 320
+        height: 240
+        bg_color: 0x000000
+        bg_opa: COVER
+        tiles:
+          # ============================================
+          # TILE 0: OROLOGIO
+          # ============================================
+          - id: tile_clock
+            row: 0
+            column: 0
+            dir: HOR
+            widgets:
+              # Card principale centrata
+              - obj:
+                  align: CENTER
+                  width: 290
+                  height: 210
+                  styles: style_card
+                  layout:
+                    type: FLEX
+                    flex_flow: COLUMN
+                    flex_align_main: CENTER
+                    flex_align_cross: CENTER
+                    pad_row: 4
+                  widgets:
+                    # Orologio grande
+                    - label:
+                        id: lbl_clock
+                        text: "--:--"
+                        text_font: font_clock
+                        text_color: 0xFFFFFF
+                    # Data in italiano
+                    - label:
+                        id: lbl_date
+                        text: "..."
+                        text_font: font_date
+                        text_color: 0x9B9B9B
+                    # Separatore
+                    - obj:
+                        width: 240
+                        height: 1
+                        bg_color: 0x292929
+                        bg_opa: COVER
+                        border_width: 0
+                    # Riga sveglia
+                    - obj:
+                        width: 260
+                        height: 36
+                        bg_opa: TRANSP
+                        border_width: 0
+                        layout:
+                          type: FLEX
+                          flex_flow: ROW
+                          flex_align_main: CENTER
+                          flex_align_cross: CENTER
+                          pad_column: 8
+                        widgets:
+                          - label:
+                              text: "07:30"
+                              text_font: font_title
+                              text_color: 0x0B56FC
+                          - label:
+                              id: lbl_alarm
+                              text: "Prossima sveglia"
+                              text_font: font_small
+                              text_color: 0x9B9B9B
+
+          # ============================================
+          # TILE 1: CONTROLLI (4 pulsanti 2x2)
+          # ============================================
+          - id: tile_controls
+            row: 0
+            column: 1
+            dir: HOR
+            widgets:
+              - obj:
+                  width: 320
+                  height: 224
+                  bg_opa: TRANSP
+                  border_width: 0
+                  pad_all: 12
+                  layout:
+                    type: FLEX
+                    flex_flow: COLUMN
+                    flex_align_main: START
+                    flex_align_cross: CENTER
+                    pad_row: 10
+                  widgets:
+                    # Titolo
+                    - label:
+                        text: "CONTROLLI"
+                        text_font: font_small
+                        text_color: 0x6F6F6F
+                        text_letter_space: 2
+                    # Riga 1
+                    - obj:
+                        width: 296
+                        height: 80
+                        bg_opa: TRANSP
+                        border_width: 0
+                        pad_all: 0
+                        layout:
+                          type: FLEX
+                          flex_flow: ROW
+                          flex_align_main: SPACE_EVENLY
+                          flex_align_cross: CENTER
+                        widgets:
+                          - button:
+                              id: btn_1
+                              width: 140
+                              height: 76
+                              styles: style_btn_off
+                              checkable: true
+                              checked:
+                                bg_color: 0x1C1C1C
+                                bg_opa: COVER
+                              on_click:
+                                - homeassistant.action:
+                                    action: light.toggle
+                                    data:
+                                      entity_id: light.zbminil2_camera_da_letto
+                              widgets:
+                                - label:
+                                    id: lbl_btn_1
+                                    align: CENTER
+                                    text_font: font_icons
+                                    text: "\U000F0769"
+                                    text_color: 0x9B9B9B
+                                    text_align: CENTER
+                          - button:
+                              id: btn_2
+                              width: 140
+                              height: 76
+                              styles: style_btn_off
+                              checkable: true
+                              checked:
+                                bg_color: 0x1C1C1C
+                                bg_opa: COVER
+                              on_click:
+                                - homeassistant.action:
+                                    action: light.toggle
+                                    data:
+                                      entity_id: light.lampada_angolare_govee
+                              widgets:
+                                - label:
+                                    id: lbl_btn_2
+                                    align: CENTER
+                                    text_font: font_icons
+                                    text: "\U000F08DD"
+                                    text_color: 0x9B9B9B
+                                    text_align: CENTER
+                    # Riga 2
+                    - obj:
+                        width: 296
+                        height: 80
+                        bg_opa: TRANSP
+                        border_width: 0
+                        pad_all: 0
+                        layout:
+                          type: FLEX
+                          flex_flow: ROW
+                          flex_align_main: SPACE_EVENLY
+                          flex_align_cross: CENTER
+                        widgets:
+                          - button:
+                              id: btn_3
+                              width: 140
+                              height: 76
+                              styles: style_btn_off
+                              checkable: true
+                              checked:
+                                bg_color: 0x1C1C1C
+                                bg_opa: COVER
+                              on_click:
+                                - homeassistant.action:
+                                    action: light.toggle
+                                    data:
+                                      entity_id: light.zbminil2_bagno_camera
+                              widgets:
+                                - label:
+                                    id: lbl_btn_3
+                                    align: CENTER
+                                    text_font: font_icons
+                                    text: "\U000F09AB"
+                                    text_color: 0x9B9B9B
+                                    text_align: CENTER
+                          - button:
+                              id: btn_4
+                              width: 140
+                              height: 76
+                              styles: style_btn_off
+                              checkable: false
+                              widgets:
+                                - label:
+                                    id: lbl_btn_4
+                                    align: CENTER
+                                    text_font: font_icons
+                                    text: "\U000F0594"
+                                    text_color: 0x9B9B9B
+                                    text_align: CENTER
+
+          # ============================================
+          # TILE 2: VOICE ASSIST
+          # ============================================
+          - id: tile_voice
+            row: 0
+            column: 2
+            dir: HOR
+            widgets:
+              - obj:
+                  width: 320
+                  height: 224
+                  bg_opa: TRANSP
+                  border_width: 0
+                  pad_all: 12
+                  layout:
+                    type: FLEX
+                    flex_flow: COLUMN
+                    flex_align_main: START
+                    flex_align_cross: CENTER
+                    pad_row: 8
+                  widgets:
+                    # Stato label
+                    - label:
+                        id: lbl_voice_state
+                        text: "PRONTO"
+                        text_font: font_small
+                        text_color: 0x6F6F6F
+                        text_letter_space: 2
+                    # Cerchio stato voce (tap per attivare voice assistant)
+                    - obj:
+                        id: voice_circle
+                        width: 80
+                        height: 80
+                        radius: 0x7FFF
+                        bg_color: 0x0B56FC
+                        bg_opa: COVER
+                        border_width: 0
+                        clickable: true
+                        on_click:
+                          then:
+                            - if:
+                                condition:
+                                  voice_assistant.is_running:
+                                then:
+                                  - voice_assistant.stop:
+                                else:
+                                  - output.turn_on: amp_enable
+                                  - voice_assistant.start:
+                    # Comando (cosa ha detto l'utente)
+                    - obj:
+                        styles: style_card
+                        width: 290
+                        height: 40
+                        widgets:
+                          - label:
+                              id: lbl_voice_command
+                              align: CENTER
+                              text: ""
+                              text_font: font_body
+                              text_color: 0xE1E1E1
+                              long_mode: DOT
+                              width: 270
+                              text_align: CENTER
+                    # Risposta
+                    - obj:
+                        width: 290
+                        height: 50
+                        bg_color: 0x1C1C1C
+                        bg_opa: COVER
+                        radius: 12
+                        border_width: 1
+                        border_color: 0x292929
+                        border_opa: COVER
+                        pad_all: 8
+                        widgets:
+                          - label:
+                              id: lbl_voice_response
+                              align: CENTER
+                              text: ""
+                              text_font: font_small
+                              text_color: 0x9B9B9B
+                              long_mode: DOT
+                              width: 270
+                              text_align: CENTER
+
+# --- Clock update interval ---
+interval:
+  - interval: 1s
+    then:
+      - lvgl.label.update:
+          id: lbl_clock
+          text: !lambda |-
+            if (id(ha_time).now().is_valid()) {
+              return id(ha_time).now().strftime("%H:%M");
+            }
+            return std::string("--:--");
+      - lvgl.label.update:
+          id: lbl_date
+          text: !lambda |-
+            if (!id(ha_time).now().is_valid()) return std::string("...");
+            static const char* giorni[] = {"Domenica","Lunedi","Martedi","Mercoledi","Giovedi","Venerdi","Sabato"};
+            static const char* mesi[] = {"Gennaio","Febbraio","Marzo","Aprile","Maggio","Giugno","Luglio","Agosto","Settembre","Ottobre","Novembre","Dicembre"};
+            auto now = id(ha_time).now();
+            char buf[40];
+            snprintf(buf, sizeof(buf), "%s %d %s", giorni[now.day_of_week-1], now.day_of_month, mesi[now.month-1]);
+            return std::string(buf);
+
+# --- Sensors ---
+sensor:
+  - platform: wifi_signal
+    name: "WiFi Signal"
+    id: wifi_signal_db
+    update_interval: 30s
+
+  - platform: uptime
+    name: "Uptime"
+    id: uptime_sensor
+    update_interval: 60s
+
+binary_sensor:
+  - platform: homeassistant
+    id: ha_camera_da_letto
+    entity_id: light.zbminil2_camera_da_letto
+    on_state:
+      then:
+        - lvgl.widget.update:
+            id: btn_1
+            state:
+              checked: !lambda return x;
+        - lvgl.label.update:
+            id: lbl_btn_1
+            text_color: !lambda |-
+              if (x) return lv_color_hex(0xFFC107);
+              return lv_color_hex(0x9B9B9B);
+  - platform: homeassistant
+    id: ha_lampada_govee
+    entity_id: light.lampada_angolare_govee
+    on_state:
+      then:
+        - lvgl.widget.update:
+            id: btn_2
+            state:
+              checked: !lambda return x;
+        - lvgl.label.update:
+            id: lbl_btn_2
+            text_color: !lambda |-
+              if (x) return lv_color_hex(0xFFC107);
+              return lv_color_hex(0x9B9B9B);
+  - platform: homeassistant
+    id: ha_bagno_camera
+    entity_id: light.zbminil2_bagno_camera
+    on_state:
+      then:
+        - lvgl.widget.update:
+            id: btn_3
+            state:
+              checked: !lambda return x;
+        - lvgl.label.update:
+            id: lbl_btn_3
+            text_color: !lambda |-
+              if (x) return lv_color_hex(0xFFC107);
+              return lv_color_hex(0x9B9B9B);
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: "IP Address"
+      id: ip_addr
+    ssid:
+      name: "Connected SSID"
+    mac_address:
+      name: "MAC Address"
+
+button:
+  - platform: restart
+    name: "Restart"
+    id: restart_btn

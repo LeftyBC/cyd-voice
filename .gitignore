@@ -1,0 +1,8 @@
+# Gitignore settings for ESPHome
+/.esphome/
+/secrets.yaml
+*.factory.bin
+*.bin
+/documentation/
+/preview/
+__pycache__/

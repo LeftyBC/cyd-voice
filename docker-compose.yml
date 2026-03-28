@@ -1,0 +1,10 @@
+services:
+  esphome:
+    image: ghcr.io/esphome/esphome
+    container_name: esphome
+    network_mode: host
+    volumes:
+      - /home/ragio579/esphome:/config
+    restart: unless-stopped
+    environment:
+      - ESPHOME_DASHBOARD_USE_PING=true
