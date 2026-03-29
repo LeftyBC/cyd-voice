@@ -62,7 +62,7 @@ esphome:
           c->write_byte(0x00, r & 0xBF);
           c->write_byte(0x09, 0x0C); c->write_byte(0x0A, 0x0C);
           c->write_byte(0x14, 0x1A); c->write_byte(0x16, 0x04); c->write_byte(0x17, 0xC8);
-          c->write_byte(0x32, 0xBF);  // 75%
+          c->write_byte(0x32, 0xC6);  // vol 7 (~77%)
           c->write_byte(0x0D, 0x01); c->write_byte(0x0E, 0x02);
           c->write_byte(0x12, 0x00); c->write_byte(0x13, 0x10);
           c->write_byte(0x1C, 0x6A); c->write_byte(0x37, 0x08);
@@ -1065,6 +1065,7 @@ number:
     initial_value: 60
     optimistic: true
     restore_value: true
+    mode: box
     unit_of_measurement: "s"
     entity_category: config
 
@@ -1078,6 +1079,7 @@ number:
     initial_value: 30
     optimistic: true
     restore_value: true
+    mode: box
     unit_of_measurement: "s"
     entity_category: config
 
@@ -1086,16 +1088,20 @@ number:
     id: volume_ctrl
     icon: mdi:volume-high
     min_value: 0
-    max_value: 100
-    step: 5
-    initial_value: 75
+    max_value: 10
+    step: 1
+    initial_value: 7
     optimistic: true
     restore_value: true
     set_action:
       - lambda: |-
-          uint8_t reg_val = (uint8_t)(x * 2.55f);
+          uint8_t reg_val = 0;
+          if (x > 0) {
+            float pct = 50.0f + (x - 1.0f) * 4.44f;
+            reg_val = (uint8_t)(pct * 2.55f);
+          }
           id(es8311_codec).write_byte(0x32, reg_val);
-          ESP_LOGW("vol", "Volume set to %.0f%% (reg=0x%02X)", x, reg_val);
+          ESP_LOGW("vol", "Volume %.0f (reg=0x%02X)", x, reg_val);
 
 select:
   - platform: template
