@@ -1,7 +1,7 @@
 substitutions:
   name: "cyd-voice"
   friendly_name: "CYD Voice"
-  version: "1.0.0-beta"
+  version: "1.0.1-beta"
 
 esphome:
   name: ${name}
@@ -1196,6 +1196,62 @@ select:
     on_value:
       - script.execute: update_buttons
 
+  - platform: template
+    name: "Button 1 Action"
+    id: btn1_action
+    options: &action_options
+      - "light.toggle"
+      - "light.turn_on"
+      - "light.turn_off"
+      - "switch.toggle"
+      - "switch.turn_on"
+      - "switch.turn_off"
+      - "fan.toggle"
+      - "fan.turn_on"
+      - "fan.turn_off"
+      - "cover.open_cover"
+      - "cover.close_cover"
+      - "cover.toggle"
+      - "lock.lock"
+      - "lock.unlock"
+      - "script.turn_on"
+      - "scene.turn_on"
+    initial_option: "light.toggle"
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    icon: mdi:play-circle
+
+  - platform: template
+    name: "Button 2 Action"
+    id: btn2_action
+    options: *action_options
+    initial_option: "light.toggle"
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    icon: mdi:play-circle
+
+  - platform: template
+    name: "Button 3 Action"
+    id: btn3_action
+    options: *action_options
+    initial_option: "light.toggle"
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    icon: mdi:play-circle
+
+  - platform: template
+    name: "Button 4 Action"
+    id: btn4_action
+    options: *action_options
+    initial_option: "light.toggle"
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    icon: mdi:play-circle
+
 text:
   - platform: template
     name: "Button 1 Entity"
@@ -1245,53 +1301,6 @@ text:
     max_length: 100
     mode: text
 
-  - platform: template
-    name: "Button 1 Action"
-    id: btn1_action
-    initial_value: "light.toggle"
-    optimistic: true
-    restore_value: true
-    entity_category: config
-    icon: mdi:play-circle
-    min_length: 0
-    max_length: 100
-    mode: text
-
-  - platform: template
-    name: "Button 2 Action"
-    id: btn2_action
-    initial_value: "light.toggle"
-    optimistic: true
-    restore_value: true
-    entity_category: config
-    icon: mdi:play-circle
-    min_length: 0
-    max_length: 100
-    mode: text
-
-  - platform: template
-    name: "Button 3 Action"
-    id: btn3_action
-    initial_value: "light.toggle"
-    optimistic: true
-    restore_value: true
-    entity_category: config
-    icon: mdi:play-circle
-    min_length: 0
-    max_length: 100
-    mode: text
-
-  - platform: template
-    name: "Button 4 Action"
-    id: btn4_action
-    initial_value: ""
-    optimistic: true
-    restore_value: true
-    entity_category: config
-    icon: mdi:play-circle
-    min_length: 0
-    max_length: 100
-    mode: text
 
 button:
   - platform: restart
