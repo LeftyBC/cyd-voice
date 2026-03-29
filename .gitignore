@@ -9,3 +9,5 @@ __pycache__/
 bare-test.yaml
 bare_audio_test.h
 esp32_i2s_direct.h
+CLAUDE.md
+.claude/
