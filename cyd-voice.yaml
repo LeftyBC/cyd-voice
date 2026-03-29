@@ -134,7 +134,7 @@ wifi:
 
 captive_portal:
 
-# --- Custom components ---
+# --- Custom components (I2S duplex for ES8311) ---
 external_components:
   - source:
       type: local
@@ -211,13 +211,13 @@ voice_assistant:
   on_timer_cancelled:
     - lambda: |-
         ESP_LOGW("timer", "Timer cancelled: %s", timer.name.c_str());
-        // Pulisci label se nessun timer attivo
+        // Clear label if no active timers
         bool any_active = false;
         for (const auto &t : id(va).get_timers()) { if (t.is_active) { any_active = true; break; } }
         if (!any_active) lv_label_set_text(id(lbl_timers), "");
   on_timer_tick:
     - lambda: |-
-        // timers e' const std::vector<Timer>&
+        // timers is const std::vector<Timer>&
         std::vector<std::pair<uint32_t, std::string>> active;
         for (const auto &t : timers) {
           if (t.is_active) {
@@ -251,7 +251,7 @@ i2c:
   scl: GPIO15
   scan: true
 
-# --- ES8311 (per I2C access) ---
+# --- ES8311 codec (I2C access for manual init) ---
 audio_dac:
   - platform: es8311
     id: es8311_codec
@@ -268,7 +268,7 @@ spi:
   mosi_pin: GPIO11
   miso_pin: GPIO13
 
-# --- I2S (per headers) ---
+# --- I2S bus (for headers only, actual I2S managed via raw ESP-IDF) ---
 i2s_audio:
   - id: i2s_bus
     i2s_lrclk_pin: GPIO7
@@ -494,7 +494,7 @@ script:
   - id: update_buttons
     then:
       - lambda: |-
-          // Mappa nome icona -> codepoint unicode
+          // Map icon name -> unicode codepoint
           auto get_glyph = [](const std::string &name) -> std::string {
             static const std::map<std::string, uint32_t> icons = {
               {"ceiling-light", 0xF0769}, {"lamp", 0xF06B5}, {"floor-lamp", 0xF08DD},
@@ -522,9 +522,9 @@ script:
             if (it == icons.end()) return "\U000F0335";  // lightbulb default
             char buf[5] = {};
             uint32_t cp = it->second;
-            // UTF-8 encode (3 bytes per codepoints F0000-FFFFF)
+            // UTF-8 encode
             buf[0] = 0xEF | ((cp >> 18) & 0x07);
-            // Actually these are in BMP supplementary - use proper UTF-8
+            // Proper UTF-8 encoding for BMP supplementary codepoints
             if (cp <= 0x7F) {
               buf[0] = cp; buf[1] = 0;
             } else if (cp <= 0x7FF) {
@@ -566,17 +566,17 @@ script:
     then:
       - script.execute: screen_wake
       - lambda: |-
-          // Vai alla pagina orologio
+          // Navigate to clock page
           lv_obj_set_tile_id(id(main_tiles), 0, 0, LV_ANIM_ON);
           id(alarm_active) = true;
           xTaskCreatePinnedToCore([](void *param) {
-            // Genera un beep da 400ms
+            // Generate 400ms beep at 880Hz
             const int n = 16000 * 400 / 1000;
             int16_t *beep = (int16_t *)heap_caps_malloc(n * 2, MALLOC_CAP_DEFAULT);
             if (beep) {
               for (int i = 0; i < n; i++)
                 beep[i] = (int16_t)(16000.0f * sinf(2.0f * M_PI * 880.0f * i / 16000.0f));
-              // Loop finche' alarm_active
+              // Loop until alarm dismissed
               while (id(alarm_active)) {
                 id(spk_duplex).play((uint8_t*)beep, n * 2);
                 vTaskDelay(pdMS_TO_TICKS(2000));
@@ -911,7 +911,7 @@ interval:
           uint32_t elapsed = millis() - id(last_activity);
           bool busy = id(echo_state) == 1 || id(echo_state) == 2 || id(alarm_active);
 
-          // Ritorno a pagina orologio
+          // Auto-return to clock page
           uint32_t clock_timeout = (uint32_t)id(clock_return_timeout).state;
           if (clock_timeout > 0 && !busy && !id(screen_off)) {
             if (elapsed > clock_timeout * 1000) {
@@ -919,7 +919,7 @@ interval:
             }
           }
 
-          // Spegnimento display
+          // Auto display off
           uint32_t disp_timeout = (uint32_t)id(display_timeout).state;
           if (disp_timeout > 0 && !id(screen_off) && !busy) {
             if (elapsed > disp_timeout * 1000) {
@@ -935,13 +935,13 @@ interval:
           static int last_state = -1;
           int state = id(echo_state);
 
-          // Se stato=2 (risposta) ma speaker fermo -> passa a done
+          // If state=2 (responding) but speaker stopped -> set done
           if (state == 2 && !id(spk_duplex).is_running()) {
             id(echo_state) = 3;
             state = 3;
           }
 
-          // Stato UI voice page
+          // Voice page UI state
           if (state != last_state) {
             last_state = state;
             if (state == 0) {
@@ -1005,10 +1005,10 @@ text_sensor:
     mac_address:
       name: "MAC Address"
 
-# --- Feedback colore pulsanti (disabilitato — richiede entity_id statici) ---
-# Per ripristinare: decommentare e adattare entity_id alle entita' desiderate.
-# Il colore icona diventa giallo (#FFC107) quando l'entita' e' accesa, grigio (#9B9B9B) quando spenta.
-# Esempio per 3 luci:
+# --- Button state feedback (disabled — requires static entity_ids) ---
+# To enable: uncomment and set entity_ids for your devices.
+# Icon turns yellow (#FFC107) when entity is on, grey (#9B9B9B) when off.
+# Example for 3 lights:
 #
 # binary_sensor:
 #   - platform: homeassistant
