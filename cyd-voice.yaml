@@ -1,7 +1,7 @@
 substitutions:
   name: "cyd-voice"
   friendly_name: "CYD Voice"
-  version: "0.5.7"
+  version: "1.0.0-beta"
 
 esphome:
   name: ${name}
@@ -78,6 +78,8 @@ esphome:
           id(mic_duplex).start();
           id(last_activity) = millis();
           ESP_LOGW("boot", "CYD Voice ready");
+      - delay: 2s
+      - script.execute: update_buttons
 
 esp32:
   board: esp32-s3-devkitc-1
@@ -114,10 +116,6 @@ api:
   encryption:
     key: !secret api_encryption_key
 
-web_server:
-  port: 80
-  log: true
-
 ota:
   - platform: esphome
     password: !secret ota_password
@@ -127,8 +125,8 @@ wifi:
     - ssid: !secret wifi_ssid
       password: !secret wifi_password
       priority: 10
-    - ssid: "GalaxyRagio"
-      password: "LaviniaRimini2024"
+    - ssid: !secret wifi_ssid_2
+      password: !secret wifi_password_2
       priority: 5
   ap:
     ssid: "${name}-fallback"
@@ -400,14 +398,159 @@ font:
     size: 36
     bpp: 4
     glyphs:
-      - "\U000F0769"  # mdi:ceiling-light
-      - "\U000F08DD"  # mdi:floor-lamp
-      - "\U000F09AB"  # mdi:toilet
-      - "\U000F0594"  # mdi:weather-night
-      - "\U000F06A9"  # mdi:robot
+      # Luci
+      - "\U000F0769"  # ceiling-light
+      - "\U000F06B5"  # lamp
+      - "\U000F08DD"  # floor-lamp
+      - "\U000F0335"  # lightbulb
+      - "\U000F07D6"  # led-strip
+      - "\U000F1793"  # chandelier
+      - "\U000F091C"  # wall-sconce
+      - "\U000F091D"  # wall-sconce-flat
+      # Interruttori
+      - "\U000F06A5"  # power-plug
+      - "\U000F1425"  # power-plug-outline
+      - "\U000F07E7"  # power-socket-eu
+      - "\U000F0521"  # toggle-switch
+      - "\U000F0522"  # toggle-switch-off
+      # Clima
+      - "\U000F0393"  # thermostat
+      - "\U000F050F"  # thermometer
+      - "\U000F0210"  # fan
+      - "\U000F001B"  # air-conditioner
+      - "\U000F0438"  # radiator
+      - "\U000F1A45"  # heat-wave
+      - "\U000F0717"  # snowflake
+      # Media
+      - "\U000F0502"  # television
+      - "\U000F04C3"  # speaker
+      - "\U000F075A"  # music
+      - "\U000F057E"  # volume-high
+      - "\U000F0581"  # volume-off
+      - "\U000F0118"  # cast
+      - "\U000F040A"  # play
+      - "\U000F03E4"  # pause
+      - "\U000F04DB"  # stop
+      # Sicurezza
+      - "\U000F033E"  # lock
+      - "\U000F033F"  # lock-open
+      - "\U000F081A"  # door
+      - "\U000F081C"  # door-open
+      - "\U000F05AE"  # window-closed
+      - "\U000F05B1"  # window-open
+      - "\U000F06D9"  # garage
+      - "\U000F06DA"  # garage-open
+      - "\U000F07AE"  # cctv
+      - "\U000F0100"  # camera
+      - "\U000F0D91"  # motion-sensor
+      - "\U000F068A"  # shield-home
+      - "\U000F009A"  # bell
+      - "\U000F12E6"  # doorbell
+      - "\U000F078F"  # alarm-light
+      # Coperture
+      - "\U000F00AC"  # blinds
+      - "\U000F1011"  # blinds-open
+      - "\U000F1846"  # curtains
+      - "\U000F1847"  # curtains-closed
+      - "\U000F1A6B"  # roller-shade
+      - "\U000F1A6C"  # roller-shade-closed
+      - "\U000F111C"  # window-shutter
+      - "\U000F111E"  # window-shutter-open
+      # Elettrodomestici
+      - "\U000F070D"  # robot-vacuum
+      - "\U000F072A"  # washing-machine
+      - "\U000F0AAC"  # dishwasher
+      - "\U000F04DE"  # stove
+      - "\U000F109F"  # coffee-maker
+      # Sensori
+      - "\U000F058E"  # water-percent
+      - "\U000F0079"  # battery
+      - "\U000F140B"  # lightning-bolt
+      - "\U000F058C"  # water
+      - "\U000F029A"  # gauge
+      - "\U000F17FE"  # sun-wireless
+      # Stanze
+      - "\U000F02E3"  # bed
+      - "\U000F04B9"  # sofa
+      - "\U000F09AB"  # toilet
+      - "\U000F1818"  # bathtub
+      - "\U000F09A0"  # shower
+      - "\U000F1239"  # desk
+      # Generale
+      - "\U000F02DC"  # home
+      - "\U000F0594"  # weather-night
+      - "\U000F0425"  # power
+      - "\U000F012C"  # check
+      - "\U000F0156"  # close
+      - "\U000F02FC"  # information
+      - "\U000F0493"  # cog
+      - "\U000F05A9"  # wifi
+      - "\U000F06A9"  # robot
+      - "\U000F0208"  # eye
+      - "\U000F0026"  # alert
 
 # --- Scripts ---
 script:
+  - id: update_buttons
+    then:
+      - lambda: |-
+          // Mappa nome icona -> codepoint unicode
+          auto get_glyph = [](const std::string &name) -> std::string {
+            static const std::map<std::string, uint32_t> icons = {
+              {"ceiling-light", 0xF0769}, {"lamp", 0xF06B5}, {"floor-lamp", 0xF08DD},
+              {"lightbulb", 0xF0335}, {"led-strip", 0xF07D6}, {"chandelier", 0xF1793},
+              {"wall-sconce", 0xF091C}, {"wall-sconce-flat", 0xF091D},
+              {"power-plug", 0xF06A5}, {"power-plug-outline", 0xF1425},
+              {"power-socket-eu", 0xF07E7}, {"toggle-switch", 0xF0521},
+              {"thermostat", 0xF0393}, {"thermometer", 0xF050F}, {"fan", 0xF0210},
+              {"air-conditioner", 0xF001B}, {"radiator", 0xF0438},
+              {"television", 0xF0502}, {"speaker", 0xF04C3}, {"music", 0xF075A},
+              {"lock", 0xF033E}, {"door", 0xF081A}, {"window-closed", 0xF05AE},
+              {"garage", 0xF06D9}, {"cctv", 0xF07AE}, {"camera", 0xF0100},
+              {"motion-sensor", 0xF0D91}, {"shield-home", 0xF068A},
+              {"bell", 0xF009A}, {"doorbell", 0xF12E6}, {"blinds", 0xF00AC},
+              {"curtains", 0xF1846}, {"roller-shade", 0xF1A6B},
+              {"window-shutter", 0xF111C}, {"robot-vacuum", 0xF070D},
+              {"washing-machine", 0xF072A}, {"dishwasher", 0xF0AAC},
+              {"stove", 0xF04DE}, {"coffee-maker", 0xF109F},
+              {"bed", 0xF02E3}, {"sofa", 0xF04B9}, {"toilet", 0xF09AB},
+              {"bathtub", 0xF1818}, {"shower", 0xF09A0}, {"desk", 0xF1239},
+              {"home", 0xF02DC}, {"weather-night", 0xF0594}, {"power", 0xF0425},
+              {"eye", 0xF0208}, {"alert", 0xF0026},
+            };
+            auto it = icons.find(name);
+            if (it == icons.end()) return "\U000F0335";  // lightbulb default
+            char buf[5] = {};
+            uint32_t cp = it->second;
+            // UTF-8 encode (3 bytes per codepoints F0000-FFFFF)
+            buf[0] = 0xEF | ((cp >> 18) & 0x07);
+            // Actually these are in BMP supplementary - use proper UTF-8
+            if (cp <= 0x7F) {
+              buf[0] = cp; buf[1] = 0;
+            } else if (cp <= 0x7FF) {
+              buf[0] = 0xC0 | (cp >> 6);
+              buf[1] = 0x80 | (cp & 0x3F);
+              buf[2] = 0;
+            } else if (cp <= 0xFFFF) {
+              buf[0] = 0xE0 | (cp >> 12);
+              buf[1] = 0x80 | ((cp >> 6) & 0x3F);
+              buf[2] = 0x80 | (cp & 0x3F);
+              buf[3] = 0;
+            } else {
+              buf[0] = 0xF0 | (cp >> 18);
+              buf[1] = 0x80 | ((cp >> 12) & 0x3F);
+              buf[2] = 0x80 | ((cp >> 6) & 0x3F);
+              buf[3] = 0x80 | (cp & 0x3F);
+              buf[4] = 0;
+            }
+            return std::string(buf);
+          };
+
+          lv_label_set_text(id(lbl_btn_1), get_glyph(id(btn1_icon).state).c_str());
+          lv_label_set_text(id(lbl_btn_2), get_glyph(id(btn2_icon).state).c_str());
+          lv_label_set_text(id(lbl_btn_3), get_glyph(id(btn3_icon).state).c_str());
+          lv_label_set_text(id(lbl_btn_4), get_glyph(id(btn4_icon).state).c_str());
+
   - id: screen_wake
     then:
       - lambda: |-
@@ -450,36 +593,6 @@ script:
       - lambda: |-
           id(alarm_active) = false;
           ESP_LOGW("alarm", "Alarm dismissed");
-
-  - id: tone_test
-    then:
-      - lambda: |-
-          const int n = 16000 / 2;  // 0.5 secondi
-          std::vector<uint8_t> tone(n * 2);
-          for (int i = 0; i < n; i++) {
-            int16_t s = (int16_t)(16000.0f * sinf(2.0f * M_PI * 440.0f * i / 16000.0f));
-            tone[i*2] = s & 0xFF;
-            tone[i*2+1] = (s >> 8) & 0xFF;
-          }
-          id(spk_duplex).play(tone.data(), tone.size());
-
-  - id: vol_up
-    then:
-      - lambda: |-
-          float v = id(volume_ctrl).state + 1;
-          if (v > 100) v = 100;
-          auto call = id(volume_ctrl).make_call();
-          call.set_value(v);
-          call.perform();
-
-  - id: vol_down
-    then:
-      - lambda: |-
-          float v = id(volume_ctrl).state - 1;
-          if (v < 0) v = 0;
-          auto call = id(volume_ctrl).make_call();
-          call.set_value(v);
-          call.perform();
 
   - id: start_assist
     then:
@@ -625,9 +738,9 @@ lvgl:
                                 bg_opa: COVER
                               on_click:
                                 - homeassistant.action:
-                                    action: light.toggle
+                                    action: !lambda return id(btn1_action).state;
                                     data:
-                                      entity_id: light.zbminil2_camera_da_letto
+                                      entity_id: !lambda return id(btn1_entity).state;
                               widgets:
                                 - label:
                                     id: lbl_btn_1
@@ -647,9 +760,9 @@ lvgl:
                                 bg_opa: COVER
                               on_click:
                                 - homeassistant.action:
-                                    action: light.toggle
+                                    action: !lambda return id(btn2_action).state;
                                     data:
-                                      entity_id: light.lampada_angolare_govee
+                                      entity_id: !lambda return id(btn2_entity).state;
                               widgets:
                                 - label:
                                     id: lbl_btn_2
@@ -681,9 +794,9 @@ lvgl:
                                 bg_opa: COVER
                               on_click:
                                 - homeassistant.action:
-                                    action: light.toggle
+                                    action: !lambda return id(btn3_action).state;
                                     data:
-                                      entity_id: light.zbminil2_bagno_camera
+                                      entity_id: !lambda return id(btn3_entity).state;
                               widgets:
                                 - label:
                                     id: lbl_btn_3
@@ -697,7 +810,15 @@ lvgl:
                               width: 140
                               height: 76
                               styles: style_btn_off
-                              checkable: false
+                              checkable: true
+                              checked:
+                                bg_color: 0x1C1C1C
+                                bg_opa: COVER
+                              on_click:
+                                - homeassistant.action:
+                                    action: !lambda return id(btn4_action).state;
+                                    data:
+                                      entity_id: !lambda return id(btn4_entity).state;
                               widgets:
                                 - label:
                                     id: lbl_btn_4
@@ -763,100 +884,6 @@ lvgl:
                         width: 296
                         text_align: CENTER
 
-          # ==========================================
-          # TILE 3: DEBUG
-          # ==========================================
-          - id: tile_debug
-            row: 0
-            column: 3
-            dir: HOR
-            widgets:
-              - obj:
-                  width: 320
-                  height: 240
-                  bg_color: 0x000000
-                  bg_opa: COVER
-                  border_width: 0
-                  pad_all: 16
-                  layout:
-                    type: FLEX
-                    flex_flow: COLUMN
-                    flex_align_main: CENTER
-                    flex_align_cross: CENTER
-                    pad_row: 12
-                  widgets:
-                    - label:
-                        text: "DEBUG"
-                        text_font: font_small
-                        text_color: 0x6F6F6F
-                        text_letter_space: 2
-                    - label:
-                        id: lbl_version
-                        text: "CYD Voice v${version}"
-                        text_font: font_small
-                        text_color: 0x4A4A4A
-                    - label:
-                        id: lbl_ip
-                        text: "IP: ..."
-                        text_font: font_small
-                        text_color: 0x4A4A4A
-                    - label:
-                        id: lbl_vol_val
-                        text: "Vol: 75"
-                        text_font: font_small
-                        text_color: 0x6F6F6F
-                    # Riga pulsanti volume: - O +
-                    - obj:
-                        width: 200
-                        height: 36
-                        bg_opa: TRANSP
-                        border_width: 0
-                        pad_all: 0
-                        layout:
-                          type: FLEX
-                          flex_flow: ROW
-                          flex_align_main: SPACE_EVENLY
-                          flex_align_cross: CENTER
-                        widgets:
-                          - button:
-                              width: 50
-                              height: 32
-                              bg_color: 0x292929
-                              radius: 6
-                              on_click:
-                                - script.execute: vol_down
-                              widgets:
-                                - label:
-                                    align: CENTER
-                                    text: "-"
-                                    text_font: font_body
-                                    text_color: 0xFFFFFF
-                          - button:
-                              width: 50
-                              height: 32
-                              bg_color: 0x0B56FC
-                              radius: 6
-                              on_click:
-                                - script.execute: tone_test
-                              widgets:
-                                - label:
-                                    align: CENTER
-                                    text: "O"
-                                    text_font: font_body
-                                    text_color: 0xFFFFFF
-                          - button:
-                              width: 50
-                              height: 32
-                              bg_color: 0x292929
-                              radius: 6
-                              on_click:
-                                - script.execute: vol_up
-                              widgets:
-                                - label:
-                                    align: CENTER
-                                    text: "+"
-                                    text_font: font_body
-                                    text_color: 0xFFFFFF
 
 # --- Intervals ---
 interval:
@@ -879,11 +906,6 @@ interval:
             char buf[40];
             snprintf(buf, sizeof(buf), "%s %d %s", giorni[now.day_of_week-1], now.day_of_month, mesi[now.month-1]);
             return std::string(buf);
-      - lvgl.label.update:
-          id: lbl_ip
-          text: !lambda |-
-            if (id(ip_addr).has_state()) return std::string("IP: ") + id(ip_addr).state;
-            return std::string("IP: ...");
       # Auto-ritorno a orologio + auto-spegnimento display
       - lambda: |-
           uint32_t elapsed = millis() - id(last_activity);
@@ -912,16 +934,6 @@ interval:
       - lambda: |-
           static int last_state = -1;
           int state = id(echo_state);
-
-          // Volume label
-          static float last_vol = -1;
-          float vol = id(volume_ctrl).state;
-          if (vol != last_vol) {
-            last_vol = vol;
-            char vbuf[16];
-            snprintf(vbuf, sizeof(vbuf), "Vol: %.0f", vol);
-            lv_label_set_text(id(lbl_vol_val), vbuf);
-          }
 
           // Se stato=2 (risposta) ma speaker fermo -> passa a done
           if (state == 2 && !id(spk_duplex).is_running()) {
@@ -993,49 +1005,54 @@ text_sensor:
     mac_address:
       name: "MAC Address"
 
-binary_sensor:
-  - platform: homeassistant
-    id: ha_camera_da_letto
-    entity_id: light.zbminil2_camera_da_letto
-    on_state:
-      then:
-        - lvgl.widget.update:
-            id: btn_1
-            state:
-              checked: !lambda return x;
-        - lvgl.label.update:
-            id: lbl_btn_1
-            text_color: !lambda |-
-              if (x) return lv_color_hex(0xFFC107);
-              return lv_color_hex(0x9B9B9B);
-  - platform: homeassistant
-    id: ha_lampada_govee
-    entity_id: light.lampada_angolare_govee
-    on_state:
-      then:
-        - lvgl.widget.update:
-            id: btn_2
-            state:
-              checked: !lambda return x;
-        - lvgl.label.update:
-            id: lbl_btn_2
-            text_color: !lambda |-
-              if (x) return lv_color_hex(0xFFC107);
-              return lv_color_hex(0x9B9B9B);
-  - platform: homeassistant
-    id: ha_bagno_camera
-    entity_id: light.zbminil2_bagno_camera
-    on_state:
-      then:
-        - lvgl.widget.update:
-            id: btn_3
-            state:
-              checked: !lambda return x;
-        - lvgl.label.update:
-            id: lbl_btn_3
-            text_color: !lambda |-
-              if (x) return lv_color_hex(0xFFC107);
-              return lv_color_hex(0x9B9B9B);
+# --- Feedback colore pulsanti (disabilitato — richiede entity_id statici) ---
+# Per ripristinare: decommentare e adattare entity_id alle entita' desiderate.
+# Il colore icona diventa giallo (#FFC107) quando l'entita' e' accesa, grigio (#9B9B9B) quando spenta.
+# Esempio per 3 luci:
+#
+# binary_sensor:
+#   - platform: homeassistant
+#     id: ha_light_1
+#     entity_id: light.zbminil2_camera_da_letto
+#     on_state:
+#       then:
+#         - lvgl.widget.update:
+#             id: btn_1
+#             state:
+#               checked: !lambda return x;
+#         - lvgl.label.update:
+#             id: lbl_btn_1
+#             text_color: !lambda |-
+#               if (x) return lv_color_hex(0xFFC107);
+#               return lv_color_hex(0x9B9B9B);
+#   - platform: homeassistant
+#     id: ha_light_2
+#     entity_id: light.lampada_angolare_govee
+#     on_state:
+#       then:
+#         - lvgl.widget.update:
+#             id: btn_2
+#             state:
+#               checked: !lambda return x;
+#         - lvgl.label.update:
+#             id: lbl_btn_2
+#             text_color: !lambda |-
+#               if (x) return lv_color_hex(0xFFC107);
+#               return lv_color_hex(0x9B9B9B);
+#   - platform: homeassistant
+#     id: ha_light_3
+#     entity_id: light.zbminil2_bagno_camera
+#     on_state:
+#       then:
+#         - lvgl.widget.update:
+#             id: btn_3
+#             state:
+#               checked: !lambda return x;
+#         - lvgl.label.update:
+#             id: lbl_btn_3
+#             text_color: !lambda |-
+#               if (x) return lv_color_hex(0xFFC107);
+#               return lv_color_hex(0x9B9B9B);
 
 number:
   - platform: template
@@ -1079,6 +1096,202 @@ number:
           uint8_t reg_val = (uint8_t)(x * 2.55f);
           id(es8311_codec).write_byte(0x32, reg_val);
           ESP_LOGW("vol", "Volume set to %.0f%% (reg=0x%02X)", x, reg_val);
+
+select:
+  - platform: template
+    name: "Button 1 Icon"
+    id: btn1_icon
+    options: &icon_options
+      - "ceiling-light"
+      - "lamp"
+      - "floor-lamp"
+      - "lightbulb"
+      - "led-strip"
+      - "chandelier"
+      - "wall-sconce"
+      - "wall-sconce-flat"
+      - "power-plug"
+      - "power-plug-outline"
+      - "power-socket-eu"
+      - "toggle-switch"
+      - "thermostat"
+      - "thermometer"
+      - "fan"
+      - "air-conditioner"
+      - "radiator"
+      - "television"
+      - "speaker"
+      - "music"
+      - "lock"
+      - "door"
+      - "window-closed"
+      - "garage"
+      - "cctv"
+      - "camera"
+      - "motion-sensor"
+      - "shield-home"
+      - "bell"
+      - "doorbell"
+      - "blinds"
+      - "curtains"
+      - "roller-shade"
+      - "window-shutter"
+      - "robot-vacuum"
+      - "washing-machine"
+      - "dishwasher"
+      - "stove"
+      - "coffee-maker"
+      - "bed"
+      - "sofa"
+      - "toilet"
+      - "bathtub"
+      - "shower"
+      - "desk"
+      - "home"
+      - "weather-night"
+      - "power"
+      - "eye"
+      - "alert"
+    initial_option: "ceiling-light"
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    icon: mdi:palette
+    on_value:
+      - script.execute: update_buttons
+
+  - platform: template
+    name: "Button 2 Icon"
+    id: btn2_icon
+    options: *icon_options
+    initial_option: "floor-lamp"
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    icon: mdi:palette
+    on_value:
+      - script.execute: update_buttons
+
+  - platform: template
+    name: "Button 3 Icon"
+    id: btn3_icon
+    options: *icon_options
+    initial_option: "toilet"
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    icon: mdi:palette
+    on_value:
+      - script.execute: update_buttons
+
+  - platform: template
+    name: "Button 4 Icon"
+    id: btn4_icon
+    options: *icon_options
+    initial_option: "weather-night"
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    icon: mdi:palette
+    on_value:
+      - script.execute: update_buttons
+
+text:
+  - platform: template
+    name: "Button 1 Entity"
+    id: btn1_entity
+    initial_value: ""
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    icon: mdi:identifier
+    min_length: 0
+    max_length: 100
+    mode: text
+
+  - platform: template
+    name: "Button 2 Entity"
+    id: btn2_entity
+    initial_value: ""
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    icon: mdi:identifier
+    min_length: 0
+    max_length: 100
+    mode: text
+
+  - platform: template
+    name: "Button 3 Entity"
+    id: btn3_entity
+    initial_value: ""
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    icon: mdi:identifier
+    min_length: 0
+    max_length: 100
+    mode: text
+
+  - platform: template
+    name: "Button 4 Entity"
+    id: btn4_entity
+    initial_value: ""
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    icon: mdi:identifier
+    min_length: 0
+    max_length: 100
+    mode: text
+
+  - platform: template
+    name: "Button 1 Action"
+    id: btn1_action
+    initial_value: "light.toggle"
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    icon: mdi:play-circle
+    min_length: 0
+    max_length: 100
+    mode: text
+
+  - platform: template
+    name: "Button 2 Action"
+    id: btn2_action
+    initial_value: "light.toggle"
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    icon: mdi:play-circle
+    min_length: 0
+    max_length: 100
+    mode: text
+
+  - platform: template
+    name: "Button 3 Action"
+    id: btn3_action
+    initial_value: "light.toggle"
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    icon: mdi:play-circle
+    min_length: 0
+    max_length: 100
+    mode: text
+
+  - platform: template
+    name: "Button 4 Action"
+    id: btn4_action
+    initial_value: ""
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    icon: mdi:play-circle
+    min_length: 0
+    max_length: 100
+    mode: text
 
 button:
   - platform: restart

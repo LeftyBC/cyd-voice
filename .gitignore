@@ -3,7 +3,7 @@
 /secrets.yaml
 *.factory.bin
 *.bin
-/documentation/
+/documentation/Freenove_ESP32_S3_Display-main/
 /preview/
 __pycache__/
 bare-test.yaml
